@@ -209,4 +209,6 @@ __marimo__/
 
 prometheus*
 prometheus/*
-kuberay/*
+kuberay/*prometheus/*
+
+kuberay/
