@@ -25,14 +25,12 @@
           # keadm
 
           # 调试工具
-          # docker       # 主要是为了客户端命令兼容性
+          docker       # 主要是为了客户端命令兼容性
           # podman       # 宿主机实际的 provider
 
 	  pyright
 	  uv
 	  
-
-	  python312Packages.ray
         ];
 
         shellHook = ''
