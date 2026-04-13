@@ -1,9 +1,13 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import MonitorRecord
 from app.schemas import MonitorRecordCreate, MonitorRecordRead
 import monitor.utils
+import subprocess
+import tempfile
+import os
+from pathlib import Path
 
 router = APIRouter(
     prefix="/monitor",
@@ -37,4 +41,33 @@ def get_proxy_actor_mem_usage(proxy_actor_id: str):
 @router.get("/proxy_actor_cpu_usage/{proxy_actor_id}")
 def get_proxy_actor_cpu_usage(proxy_actor_id: str):
     return monitor.utils.get_proxy_actor_cpu_usage(proxy_actor_id)
->>>>>>> Conflict 1 of 1 ends
+
+@router.post("/submit")
+async def submit(file: UploadFile = File(...)):
+    #     # 验证文件类型
+    # if not file.filename.endswith('.py'):
+    #     raise HTTPException(400, "只支持 .py 文件")
+    
+    # 创建临时文件
+    with tempfile.NamedTemporaryFile(mode='wb', suffix='.py', delete=False) as tmp_file:
+        content = await file.read()
+        tmp_file.write(content)
+        tmp_path = tmp_file.name
+    
+    try:
+        # 执行 Python 文件
+        result = subprocess.run(
+            ['python', tmp_path],
+            capture_output=True,
+            text=True
+        )
+        
+        return {
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "return_code": result.returncode
+        }
+    finally:
+        # 清理临时文件
+        os.unlink(tmp_path)
+

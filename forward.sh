@@ -5,3 +5,5 @@ kubectl port-forward service/raycluster-kuberay-head-svc 8265:8265 6379:6379 100
 kubectl port-forward -n prometheus-system service/prometheus-kube-prometheus-prometheus 9090:9090 &
 
 kubectl port-forward -n prometheus-system service/prometheus-grafana 3000:80 &
+
+kubectl port-forward svc/vm-storage-victoria-metrics-single-server -n prometheus-system 8428:8428
