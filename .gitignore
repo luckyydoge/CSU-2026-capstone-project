@@ -210,8 +210,8 @@ __marimo__/
 prometheus*
 prometheus/*
 kuberay/*
-
 uploads/
 require/
 test/
-AGENTS.md
+kuberay/*kuberay/*prometheus/*
+kuberay/

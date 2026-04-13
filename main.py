@@ -2,6 +2,7 @@ import sys
 import os
 
 from config import CONFIG
+from routers.monitor import router as monitor_router
 
 os.makedirs(CONFIG.STAGED_CODE_DIR, exist_ok=True)
 os.makedirs(CONFIG.STRATEGY_CODE_DIR, exist_ok=True)
@@ -45,6 +46,7 @@ from api.routes import router as api_router
 from routers import monitor, db_api
 
 app = FastAPI(title="协同推理平台 - 端边云协同系统")
+app.include_router(monitor_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -70,8 +72,10 @@ def read_index():
     return "<html><body><h1>协同推理平台</h1><p>前端页面未找到</p></body></html>"
 
 app.include_router(api_router)
-app.include_router(monitor.router)
 app.include_router(db_api.router)
+
+ 
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -88,3 +92,7 @@ async def shutdown_event():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8001)
+    
+@app.get("/")
+async def root():
+    return {"message": "Hello World"}
