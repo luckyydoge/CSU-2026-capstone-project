@@ -7,7 +7,9 @@ requires-python = "==3.12.*"
 dependencies = [
     "fastapi[standard]>=0.135.3",
     "ray[default]==2.54.1",
+    "monitor",
     "prometheus-api-client>=0.7.2",
+    "psutil>=7.2.2",
     "sqlalchemy>=2.0",
     "pillow>=10.0",
 ]
@@ -17,3 +19,11 @@ enablePydanticAnalysis = true    # ✅ 核心：让 Pyright 认识 FastAPI / Pyd
 venvPath = "."                  # ✅ 让 LSP 找到你项目里的 .venv 虚拟环境
 venv = ".venv"                  # ✅ 自动加载依赖：fastapi、ray 等
 typeCheckingMode = "basic"      # 温和检查，不乱报红
+
+[tool.uv.workspace]
+members = [
+    "monitor",
+]
+
+[tool.uv.sources]
+monitor = { workspace = true }
