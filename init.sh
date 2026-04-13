@@ -12,5 +12,5 @@ helm install kuberay-operator kuberay/kuberay-operator --version 1.5.1
 kubectl get pods
 
 # 创建kuberay cluster
-helm install raycluster kuberay/ray-cluster --version 1.5.1
+helm install raycluster kuberay/ray-cluster --version 1.6.0 --set image.tag=2.54.1-py312
 
