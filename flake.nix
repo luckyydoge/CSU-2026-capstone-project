@@ -30,6 +30,7 @@
 
 	  pyright
 	  uv
+	  just
 	  
         ];
 
