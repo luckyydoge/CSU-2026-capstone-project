@@ -3,8 +3,8 @@ name = "csu-2026-capstone-project"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = "==3.9.*"
+requires-python = "==3.12.*"
 dependencies = [
-    "fastapi[standard]>=0.128.8",
-    "ray[default]==2.46.0",
+    "fastapi[standard]>=0.135.3",
+    "ray[default]>=2.54.1",
 ]
