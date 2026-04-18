@@ -1,3 +1,13 @@
+<<<<<<< Updated upstream
+from fastapi import FastAPI
+
+app = FastAPI()
+
+
+@app.get("/")
+async def root():
+    return {"message": "Hello World"}
+=======
 import time
 import os
 import ray
@@ -49,3 +59,4 @@ async def handle_universal_task(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+>>>>>>> Stashed changes
