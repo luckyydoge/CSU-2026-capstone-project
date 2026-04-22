@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>端-边-云协同推理实验平台</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f7fb;
+            color: #1e293b;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        h1 {
+            margin-bottom: 0.5rem;
+        }
+        .subtitle {
+            color: #475569;
+            margin-bottom: 2rem;
+            border-left: 4px solid #3b82f6;
+            padding-left: 1rem;
+        }
+        .tabs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid #cbd5e1;
+            padding-bottom: 0.5rem;
+        }
+        .tab-btn {
+            background: none;
+            border: none;
+            padding: 0.6rem 1.2rem;
+            font-size: 1rem;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.2s;
+            color: #475569;
+        }
+        .tab-btn.active {
+            background-color: #3b82f6;
+            color: white;
+        }
+        .tab-btn:hover:not(.active) {
+            background-color: #e2e8f0;
+        }
+        .tab-pane {
+            display: none;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .tab-pane.active {
+            display: block;
+        }
+        .form-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            align-items: flex-end;
+        }
+        .form-group {
+            flex: 1;
+            min-width: 180px;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 0.3rem;
+            font-size: 0.85rem;
+        }
+        input, select, textarea {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+        button {
+            background-color: #3b82f6;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: 0.2s;
+        }
+        button:hover {
+            background-color: #2563eb;
+        }
+        button.danger {
+            background-color: #ef4444;
+        }
+        button.danger:hover {
+            background-color: #dc2626;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        th, td {
+            border: 1px solid #e2e8f0;
+            padding: 0.6rem;
+            text-align: left;
+            vertical-align: top;
+        }
+        th {
+            background-color: #f1f5f9;
+        }
+        pre {
+            background: #f1f5f9;
+            padding: 0.5rem;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 0.8rem;
+        }
+        .card {
+            background: #f8fafc;
+            border-radius: 12px;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+        .flex-between {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .badge {
+            background-color: #e2e8f0;
+            padding: 0.2rem 0.5rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+        }
+        hr {
+            margin: 1rem 0;
+        }
+        .json-editor {
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .message {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #1e293b;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🧠 端-边-云协同推理实验平台</h1>
+    <div class="subtitle">应用注册 · 阶段管理 · 部署配置 · 策略插拔 · 任务执行与追踪</div>
+
+    <div class="tabs">
+        <button class="tab-btn active" data-tab="stages">📦 阶段管理</button>
+        <button class="tab-btn" data-tab="apps">📱 应用管理</button>
+        <button class="tab-btn" data-tab="deploy">⚙️ 部署配置</button>
+        <button class="tab-btn" data-tab="strategies">🧠 策略管理</button>
+        <button class="tab-btn" data-tab="tasks">🚀 任务提交</button>
+        <button class="tab-btn" data-tab="results">📊 任务记录</button>
+        <button class="tab-btn" data-tab="trace">🔍 追踪详情</button>
+    </div>
+
+    <!-- 阶段管理 -->
+    <div id="stages" class="tab-pane active">
+        <div class="flex-between"><h3>注册新阶段</h3><button onclick="resetAll()" class="danger">🗑️ 重置所有数据</button></div>
+        <div class="form-row">
+            <div class="form-group"><label>阶段名称 *</label><input type="text" id="stageName" placeholder="例如 preprocess"></div>
+            <div class="form-group"><label>Handler (module:function)</label><input type="text" id="stageHandler" value="test_dummy:run"></div>
+            <div class="form-group"><label>输入类型 *</label><input type="text" id="stageInputType" placeholder="image/json"></div>
+            <div class="form-group"><label>输出类型 *</label><input type="text" id="stageOutputType" placeholder="feature"></div>
+        </div>
+        <div class="form-row">
+            <div class="form-group"><label>描述</label><input type="text" id="stageDesc"></div>
+            <div class="form-group"><label>模型名称(可选)</label><input type="text" id="stageModel"></div>
+            <div class="form-group"><label>依赖 (逗号分隔)</label><input type="text" id="stageDeps" placeholder="numpy,torch"></div>
+            <div class="form-group"><label>配置 JSON</label><input type="text" id="stageConfig" value="{}"></div>
+        </div>
+        <button onclick="createStage()">➕ 注册阶段</button>
+        <hr>
+        <h3>已注册阶段</h3>
+        <table id="stagesTable"><thead><tr><th>名称</th><th>Handler</th><th>输入类型</th><th>输出类型</th><th>操作</th></tr></thead><tbody></tbody></table>
+    </div>
+
+    <!-- 应用管理 -->
+    <div id="apps" class="tab-pane">
+        <h3>注册新应用</h3>
+        <div class="form-row">
+            <div class="form-group"><label>应用名称 *</label><input type="text" id="appName"></div>
+            <div class="form-group"><label>输入类型</label><input type="text" id="appInputType" value="raw"></div>
+            <div class="form-group"><label>入口阶段</label><input type="text" id="appEntry"></div>
+            <div class="form-group"><label>出口阶段 (JSON数组)</label><input type="text" id="appExits" value='["output"]'></div>
+        </div>
+        <div class="form-group"><label>阶段列表 (JSON: [{"name":"stage1","output_type":"type1"},...])</label><textarea id="appStages" rows="3" style="font-family:monospace;">[{"name":"data_ingest","output_type":"prepared"},{"name":"preprocess","output_type":"features"},{"name":"light_inference","output_type":"label"},{"name":"output","output_type":"result"}]</textarea></div>
+        <div class="form-group"><label>边列表 (JSON: [{"from_stage":"a","to_stage":"b"},...])</label><textarea id="appEdges" rows="3" style="font-family:monospace;">[{"from_stage":"data_ingest","to_stage":"preprocess"},{"from_stage":"preprocess","to_stage":"light_inference"},{"from_stage":"light_inference","to_stage":"output"}]</textarea></div>
+        <button onclick="createApp()">📌 注册应用</button>
+        <hr>
+        <h3>已注册应用</h3>
+        <table id="appsTable"><thead><tr><th>应用ID</th><th>名称</th><th>入口</th><th>出口</th><th>操作</th></tr></thead><tbody></tbody></table>
+    </div>
+
+    <!-- 部署配置 -->
+    <div id="deploy" class="tab-pane">
+        <h3>配置阶段部署</h3>
+        <div class="form-row">
+            <div class="form-group"><label>阶段名称</label><input type="text" id="deployStage"></div>
+            <div class="form-group"><label>允许层级 (JSON数组)</label><input type="text" id="deployTiers" value='["end","edge"]'></div>
+            <div class="form-group"><label>CPU核数</label><input type="number" id="deployCpu" value="0.5" step="0.1"></div>
+            <div class="form-group"><label>内存(MB)</label><input type="number" id="deployMem" value="256"></div>
+        </div>
+        <div class="form-row">
+            <div class="form-group"><label>GPU数量</label><input type="number" id="deployGpu" value="0"></div>
+            <div class="form-group"><label>副本数</label><input type="number" id="deployReplicas" value="1"></div>
+            <div class="form-group"><label>描述</label><input type="text" id="deployDesc"></div>
+        </div>
+        <button onclick="createDeployment()">⚙️ 保存部署配置</button>
+        <hr>
+        <h3>现有部署配置</h3>
+        <table id="deployTable"><thead><tr><th>阶段名称</th><th>允许层级</th><th>资源</th><th>副本</th><th>操作</th></tr></thead><tbody></tbody></table>
+    </div>
+
+    <!-- 策略管理 -->
+    <div id="strategies" class="tab-pane">
+        <h3>注册策略</h3>
+        <div class="form-row">
+            <div class="form-group"><label>策略名称 *</label><input type="text" id="strategyName"></div>
+            <div class="form-group"><label>类型</label><select id="strategyType"><option>routing</option><option>split</option><option>fallback</option></select></div>
+            <div class="form-group"><label>Handler (module:function)</label><input type="text" id="strategyHandler" value="strategies.random_routing:decide"></div>
+        </div>
+        <div class="form-group"><label>配置 JSON</label><textarea id="strategyConfig" rows="2">{}</textarea></div>
+        <div class="form-group"><label>描述</label><input type="text" id="strategyDesc"></div>
+        <button onclick="createStrategy()">🧩 注册策略</button>
+        <hr>
+        <h3>已注册策略</h3>
+        <table id="strategiesTable"><thead><tr><th>名称</th><th>类型</th><th>Handler</th><th>配置</th></tr></thead><tbody></tbody></table>
+    </div>
+
+    <!-- 任务提交 -->
+    <div id="tasks" class="tab-pane">
+        <h3>提交推理任务</h3>
+        <div class="form-row">
+            <div class="form-group"><label>选择应用</label><select id="taskAppSelect"></select></div>
+            <div class="form-group"><label>选择策略</label><select id="taskStrategySelect"></select></div>
+            <div class="form-group"><label>输入数据 (任意JSON)</label><input type="text" id="taskInput" value="hello_world"></div>
+        </div>
+        <button onclick="submitTask()">▶️ 执行任务</button>
+        <div id="taskResult" class="card" style="display:none; margin-top:1rem;"></div>
+    </div>
+
+    <!-- 任务记录 -->
+    <div id="results" class="tab-pane">
+        <h3>历史任务</h3>
+        <button onclick="loadTasks()">🔄 刷新任务列表</button>
+        <table id="tasksListTable"><thead><tr><th>任务ID</th><th>应用</th><th>策略</th><th>状态</th><th>完成时间</th><th>最终输出</th><th>操作</th></tr></thead><tbody></tbody></table>
+    </div>
+
+    <!-- 追踪详情 -->
+    <div id="trace" class="tab-pane">
+        <h3>执行追踪</h3>
+        <div class="form-group"><label>输入任务ID</label><input type="text" id="traceTaskId" placeholder="例如 e8e0311d-..."></div>
+        <button onclick="fetchTrace()">🔍 获取追踪</button>
+        <pre id="traceContent" style="margin-top:1rem;"></pre>
+    </div>
+</div>
+<div id="message" class="message"></div>
+
+<script>
+    const API_BASE = '/api/v1';
+    let currentStages = [];
+
+    function showMessage(msg, isError = false) {
+        const el = document.getElementById('message');
+        el.textContent = msg;
+        el.style.backgroundColor = isError ? '#dc2626' : '#1e293b';
+        el.style.opacity = '1';
+        setTimeout(() => el.style.opacity = '0', 2500);
+    }
+
+    async function apiCall(url, method, body = null) {
+        const opts = { method, headers: { 'Content-Type': 'application/json' } };
+        if (body) opts.body = JSON.stringify(body);
+        const res = await fetch(API_BASE + url, opts);
+        if (!res.ok) {
+            const text = await res.text();
+            throw new Error(`${res.status}: ${text}`);
+        }
+        return res.json();
+    }
+
+    // 阶段管理
+    async function createStage() {
+        const name = document.getElementById('stageName').value.trim();
+        const handler = document.getElementById('stageHandler').value.trim();
+        const input_type = document.getElementById('stageInputType').value.trim();
+        const output_type = document.getElementById('stageOutputType').value.trim();
+        if (!name || !handler || !input_type || !output_type) return showMessage('请填写名称、handler、输入输出类型', true);
+        const dependencies = document.getElementById('stageDeps').value.split(',').map(s=>s.trim()).filter(s=>s);
+        let config = {};
+        try { config = JSON.parse(document.getElementById('stageConfig').value); } catch(e) {}
+        const body = { name, handler, input_type, output_type, description: document.getElementById('stageDesc').value, model_name: document.getElementById('stageModel').value, dependencies, config, can_split: false, is_deployable: true };
+        try {
+            await apiCall('/stages', 'POST', body);
+            showMessage('阶段注册成功');
+            loadStages();
+        } catch(e) { showMessage('注册失败: '+e.message, true); }
+    }
+    async function loadStages() {
+        try {
+            const data = await apiCall('/stages', 'GET');
+            const tbody = document.querySelector('#stagesTable tbody');
+            tbody.innerHTML = '';
+            for (const [name, stage] of Object.entries(data)) {
+                const row = tbody.insertRow();
+                row.insertCell(0).textContent = name;
+                row.insertCell(1).textContent = stage.handler;
+                row.insertCell(2).textContent = stage.input_type;
+                row.insertCell(3).textContent = stage.output_type;
+                const delBtn = document.createElement('button');
+                delBtn.textContent = '删除';
+                delBtn.onclick = () => deleteStage(name);
+                row.insertCell(4).appendChild(delBtn);
+            }
+            currentStages = Object.keys(data);
+            refreshAppStageSelects();
+        } catch(e) { console.error(e); }
+    }
+    async function deleteStage(name) {
+        if(!confirm(`删除阶段 ${name} ？`)) return;
+        try {
+            await apiCall(`/stages/${name}`, 'DELETE');
+            showMessage('删除成功');
+            loadStages();
+        } catch(e) { showMessage('删除失败', true); }
+    }
+
+    // 应用管理
+    async function createApp() {
+        const name = document.getElementById('appName').value.trim();
+        const input_type = document.getElementById('appInputType').value.trim();
+        const entry_stage = document.getElementById('appEntry').value.trim();
+        let exit_stages, stages, edges;
+        try { exit_stages = JSON.parse(document.getElementById('appExits').value); } catch(e) { return showMessage('出口阶段JSON无效', true); }
+        try { stages = JSON.parse(document.getElementById('appStages').value); } catch(e) { return showMessage('阶段列表JSON无效', true); }
+        try { edges = JSON.parse(document.getElementById('appEdges').value); } catch(e) { return showMessage('边JSON无效', true); }
+        if(!name || !entry_stage) return showMessage('请填写应用名称和入口阶段', true);
+        const body = { name, input_type, stages, edges, entry_stage, exit_stages };
+        try {
+            const res = await apiCall('/applications', 'POST', body);
+            showMessage('应用注册成功, ID: '+res.app_id);
+            loadApps();
+        } catch(e) { showMessage('注册失败: '+e.message, true); }
+    }
+    async function loadApps() {
+        try {
+            const data = await apiCall('/applications', 'GET');
+            const tbody = document.querySelector('#appsTable tbody');
+            tbody.innerHTML = '';
+            for (const [id, app] of Object.entries(data)) {
+                const row = tbody.insertRow();
+                row.insertCell(0).textContent = id;
+                row.insertCell(1).textContent = app.name;
+                row.insertCell(2).textContent = app.entry_stage;
+                row.insertCell(3).textContent = JSON.stringify(app.exit_stages);
+                const delBtn = document.createElement('button');
+                delBtn.textContent = '删除';
+                delBtn.onclick = () => deleteApp(id);
+                row.insertCell(4).appendChild(delBtn);
+            }
+            refreshTaskAppSelect();
+        } catch(e) { console.error(e); }
+    }
+    async function deleteApp(id) {
+        if(!confirm(`删除应用 ${id}？`)) return;
+        try {
+            await apiCall(`/applications/${id}`, 'DELETE');
+            loadApps();
+        } catch(e) { showMessage('删除失败', true); }
+    }
+
+    // 部署配置
+    async function createDeployment() {
+        const stage_name = document.getElementById('deployStage').value.trim();
+        if(!stage_name) return showMessage('阶段名称不能为空', true);
+        let allowed_tiers;
+        try { allowed_tiers = JSON.parse(document.getElementById('deployTiers').value); } catch(e) { return showMessage('allowed_tiers JSON无效', true); }
+        const resources = { cpu_cores: parseFloat(document.getElementById('deployCpu').value), memory_mb: parseInt(document.getElementById('deployMem').value), gpu_count: parseInt(document.getElementById('deployGpu').value) };
+        const replicas = parseInt(document.getElementById('deployReplicas').value);
+        const body = { stage_name, allowed_tiers, resources, replicas, description: document.getElementById('deployDesc').value };
+        try {
+            await apiCall('/deployments', 'POST', body);
+            showMessage('部署配置保存成功');
+            loadDeployments();
+        } catch(e) { showMessage('保存失败: '+e.message, true); }
+    }
+    async function loadDeployments() {
+        try {
+            const data = await apiCall('/deployments', 'GET');
+            const tbody = document.querySelector('#deployTable tbody');
+            tbody.innerHTML = '';
+            for (const [stage, dep] of Object.entries(data)) {
+                const row = tbody.insertRow();
+                row.insertCell(0).textContent = stage;
+                row.insertCell(1).textContent = JSON.stringify(dep.allowed_tiers);
+                row.insertCell(2).textContent = `${dep.resources.cpu_cores}CPU / ${dep.resources.memory_mb}MB / GPU${dep.resources.gpu_count}`;
+                row.insertCell(3).textContent = dep.replicas;
+                const delBtn = document.createElement('button');
+                delBtn.textContent = '删除';
+                delBtn.onclick = () => deleteDeployment(stage);
+                row.insertCell(4).appendChild(delBtn);
+            }
+        } catch(e) { console.error(e); }
+    }
+    async function deleteDeployment(stage) {
+        if(!confirm(`删除部署配置 ${stage}？`)) return;
+        try {
+            await apiCall(`/deployments/${stage}`, 'DELETE');
+            loadDeployments();
+        } catch(e) { showMessage('删除失败', true); }
+    }
+
+    // 策略管理
+    async function createStrategy() {
+        const name = document.getElementById('strategyName').value.trim();
+        const strategy_type = document.getElementById('strategyType').value;
+        const handler = document.getElementById('strategyHandler').value.trim();
+        let config = {};
+        try { config = JSON.parse(document.getElementById('strategyConfig').value); } catch(e) {}
+        const description = document.getElementById('strategyDesc').value;
+        if(!name || !handler) return showMessage('名称和handler不能为空', true);
+        const body = { name, strategy_type, handler, config, description };
+        try {
+            await apiCall('/strategies', 'POST', body);
+            showMessage('策略注册成功');
+            loadStrategies();
+            refreshTaskStrategySelect();
+        } catch(e) { showMessage('注册失败: '+e.message, true); }
+    }
+    async function loadStrategies() {
+        try {
+            const data = await apiCall('/strategies', 'GET');
+            const tbody = document.querySelector('#strategiesTable tbody');
+            tbody.innerHTML = '';
+            for (const [name, s] of Object.entries(data)) {
+                const row = tbody.insertRow();
+                row.insertCell(0).textContent = name;
+                row.insertCell(1).textContent = s.strategy_type;
+                row.insertCell(2).textContent = s.handler;
+                row.insertCell(3).textContent = JSON.stringify(s.config);
+            }
+        } catch(e) { console.error(e); }
+    }
+
+    // 任务提交
+    async function submitTask() {
+        const application_name = document.getElementById('taskAppSelect').value;
+        const strategy_name = document.getElementById('taskStrategySelect').value;
+        const input_data = document.getElementById('taskInput').value;
+        if(!application_name || !strategy_name) return showMessage('请选择应用和策略', true);
+        try {
+            const res = await apiCall('/tasks', 'POST', { application_name, strategy_name, input_data, runtime_config: {} });
+            showMessage(`任务已提交，ID: ${res.task_id}`);
+            document.getElementById('taskResult').style.display = 'block';
+            document.getElementById('taskResult').innerHTML = `<strong>任务ID:</strong> ${res.task_id}<br><strong>状态:</strong> ${res.status}<br><strong>创建时间:</strong> ${res.created_at}<br>等待几秒后查看结果...`;
+            setTimeout(() => {
+                fetchTaskDetail(res.task_id).then(task => {
+                    document.getElementById('taskResult').innerHTML = `<strong>任务详情</strong><pre>${JSON.stringify(task, null, 2)}</pre>`;
+                    loadTasks(); // 刷新任务列表
+                });
+            }, 2000);
+        } catch(e) { showMessage('提交失败: '+e.message, true); }
+    }
+    async function fetchTaskDetail(taskId) {
+        const res = await fetch(`${API_BASE}/tasks/${taskId}`);
+        if(!res.ok) throw new Error('获取任务失败');
+        return res.json();
+    }
+    async function loadTasks() {
+        try {
+            const data = await apiCall('/tasks', 'GET');
+            const tbody = document.querySelector('#tasksListTable tbody');
+            tbody.innerHTML = '';
+            for (const [id, task] of Object.entries(data)) {
+                const row = tbody.insertRow();
+                row.insertCell(0).textContent = id;
+                row.insertCell(1).textContent = task.application_name;
+                row.insertCell(2).textContent = task.strategy_name;
+                row.insertCell(3).textContent = task.status;
+                row.insertCell(4).textContent = task.completed_at || '-';
+                row.insertCell(5).textContent = task.final_output ? JSON.stringify(task.final_output).slice(0,50) : '-';
+                const btn = document.createElement('button');
+                btn.textContent = '查看Trace';
+                btn.onclick = () => viewTrace(id);
+                row.insertCell(6).appendChild(btn);
+            }
+        } catch(e) { console.error(e); }
+    }
+    function viewTrace(taskId) {
+        document.getElementById('traceTaskId').value = taskId;
+        document.querySelector('.tab-btn[data-tab="trace"]').click();
+        fetchTrace();
+    }
+    async function fetchTrace() {
+        const taskId = document.getElementById('traceTaskId').value.trim();
+        if(!taskId) return showMessage('请输入任务ID', true);
+        try {
+            const trace = await apiCall(`/results/${taskId}/trace`, 'GET');
+            document.getElementById('traceContent').textContent = JSON.stringify(trace, null, 2);
+        } catch(e) { document.getElementById('traceContent').textContent = `获取失败: ${e.message}`; }
+    }
+
+    // 辅助刷新下拉框
+    function refreshAppStageSelects() {}
+    function refreshTaskAppSelect() {
+        const select = document.getElementById('taskAppSelect');
+        fetch(`${API_BASE}/applications`).then(res=>res.json()).then(data => {
+            select.innerHTML = '<option value="">--选择应用--</option>';
+            for (const [id, app] of Object.entries(data)) {
+                const opt = document.createElement('option');
+                opt.value = app.name;
+                opt.textContent = `${app.name} (${id})`;
+                select.appendChild(opt);
+            }
+        }).catch(console.error);
+    }
+    function refreshTaskStrategySelect() {
+        const select = document.getElementById('taskStrategySelect');
+        fetch(`${API_BASE}/strategies`).then(res=>res.json()).then(data => {
+            select.innerHTML = '<option value="">--选择策略--</option>';
+            for (const [name] of Object.entries(data)) {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                select.appendChild(opt);
+            }
+        }).catch(console.error);
+    }
+
+    // 重置所有数据
+    async function resetAll() {
+        if(!confirm('⚠️ 将清除所有阶段、应用、部署、策略、任务和追踪数据，不可恢复。确定吗？')) return;
+        try {
+            await fetch('/debug/reset', { method: 'POST' });
+            showMessage('所有数据已重置');
+            loadStages(); loadApps(); loadDeployments(); loadStrategies(); loadTasks();
+            refreshTaskAppSelect(); refreshTaskStrategySelect();
+        } catch(e) { showMessage('重置失败', true); }
+    }
+
+    // 标签页切换
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tabId = btn.getAttribute('data-tab');
+            document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            if(tabId === 'stages') loadStages();
+            if(tabId === 'apps') loadApps();
+            if(tabId === 'deploy') loadDeployments();
+            if(tabId === 'strategies') loadStrategies();
+            if(tabId === 'results') loadTasks();
+        });
+    });
+
+    // 初始加载
+    loadStages(); loadApps(); loadDeployments(); loadStrategies(); loadTasks();
+    refreshTaskAppSelect(); refreshTaskStrategySelect();
+</script>
+</body>
+</html>
