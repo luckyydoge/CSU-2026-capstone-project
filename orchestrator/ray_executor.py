@@ -1,4 +1,5 @@
 import ray
+import importlib
 import uuid
 import time
 import socket
@@ -31,18 +32,22 @@ if not ray.is_initialized():
         ray.init(runtime_env={"working_dir": "."})
 
 def get_stage_function(stage_name: str):
-    """动态加载阶段的可执行函数（保持不变）"""
+    """根据阶段名称动态加载可执行函数"""
+    from storage.memory_store import STAGE_DB
     stage_info = STAGE_DB.get(stage_name)
     if not stage_info:
         raise ValueError(f"Stage '{stage_name}' not registered")
     handler = stage_info["handler"]
-    if ":" in handler:
-        module_path, func_name = handler.split(":", 1)
-    else:
-        module_path, func_name = handler.rsplit(".", 1)
-    import importlib
-    module = importlib.import_module(module_path)
-    func = getattr(module, func_name)
+    if ":" not in handler:
+        raise ValueError(f"Invalid handler format: {handler}. Expected 'module:function'")
+    module_name, func_name = handler.split(":", 1)
+    try:
+        module = importlib.import_module(module_name)
+    except ImportError as e:
+        raise ImportError(f"Failed to import module '{module_name}': {e}. Ensure file is uploaded to staged_code/")
+    func = getattr(module, func_name, None)
+    if not callable(func):
+        raise ValueError(f"Function '{func_name}' not found or not callable in module '{module_name}'")
     return func
 
 class RayExecutor:

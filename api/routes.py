@@ -1,4 +1,8 @@
 # api/routes.py
+import os
+import shutil
+from fastapi import UploadFile, File, HTTPException
+
 from fastapi import APIRouter, HTTPException, status
 from datetime import datetime
 from typing import Dict, List
@@ -17,6 +21,7 @@ from service.deployment_service import DeploymentService
 from service.strategy_service import StrategyService
 from service.task_service import TaskService
 
+STAGED_CODE_DIR = "staged_code"
 router = APIRouter(prefix="/api/v1", tags=["end_edge_cloud"])
 
 # ==================== 阶段 ====================
@@ -38,7 +43,29 @@ async def get_stage(name: str):
     if not stage:
         raise HTTPException(status_code=404, detail="Stage not found")
     return stage
-
+    
+@router.post("/stages/upload")
+async def upload_stage_code(file: UploadFile = File(...)):
+    """
+    上传 Python 文件，用于自定义阶段。
+    文件名（不含 .py）将作为模块名，handler 格式为 "模块名:函数名"
+    """
+    if not file.filename.endswith(".py"):
+        raise HTTPException(status_code=400, detail="Only .py files are allowed")
+    
+    # 安全处理文件名（防止路径遍历）
+    safe_filename = os.path.basename(file.filename)
+    file_path = os.path.join(STAGED_CODE_DIR, safe_filename)
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    module_name = safe_filename[:-3]  # 去掉 .py
+    return {
+        "filename": safe_filename,
+        "module_name": module_name,
+        "message": "Upload successful. Use handler format: f'{module_name}:function_name'"
+    }
 # ==================== 应用 ====================
 @router.post("/applications", status_code=status.HTTP_201_CREATED)
 async def register_application(request: ApplicationCreateRequest):

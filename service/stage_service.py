@@ -8,13 +8,10 @@ class StageService:
 
     @staticmethod
     def validate(req: StageCreateRequest):
-        # 1️⃣ name 必须存在
-        if not req.name or not req.name.strip():
-            raise ValueError("Stage name 不能为空")
-
-        # 2️⃣ handler 必须合法（简单校验包含点或冒号）
-        if "." not in req.handler and ":" not in req.handler:
-            raise ValueError("handler 必须是 module.function 或 module:ClassName 格式")
+        if not req.name:
+            raise ValueError("Stage name required")
+        if ":" not in req.handler:
+            raise ValueError("Handler must be in format 'module:function' (e.g., 'my_stage:run')")
 
         # 3️⃣ input_type / output_type 不能为空
         if not req.input_type:
