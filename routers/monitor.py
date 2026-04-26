@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import MonitorRecord
 from app.schemas import MonitorRecordCreate, MonitorRecordRead
+from monitor.controller import get_controller
 import monitor.utils
 import subprocess
 import tempfile
@@ -41,6 +42,14 @@ def get_proxy_actor_mem_usage(proxy_actor_id: str):
 @router.get("/proxy_actor_cpu_usage/{proxy_actor_id}")
 def get_proxy_actor_cpu_usage(proxy_actor_id: str):
     return monitor.utils.get_proxy_actor_cpu_usage(proxy_actor_id)
+
+
+@router.get("/latency")
+def get_latency():
+    ctrl = get_controller()
+    if ctrl is None:
+        return {"error": "controller not initialized"}
+    return ctrl.latest
 
 @router.post("/submit")
 async def submit(file: UploadFile = File(...)):

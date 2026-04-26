@@ -1,0 +1,9 @@
+prometheus_url: "http://localhost:9090"
+scrape_interval: 30
+
+stages:
+  - stage_id: "load_test"
+    worker_label: "worker"
+    percentile: 0.99
+    window: "10s"
+
