@@ -44,19 +44,15 @@ class TestScaleSet:
         assert result["success"] is True
         assert result["previous_replicas"] == 2
         assert result["current_replicas"] == 3
-        scaler.api.patch_namespaced_custom_object.assert_called_once_with(
+        expected_body = dict(mock_raycluster)
+        expected_body["spec"]["workerGroupSpecs"][0]["replicas"] = 3
+        scaler.api.replace_namespaced_custom_object.assert_called_once_with(
             group=CRD_GROUP,
             version=CRD_VERSION,
             namespace="default",
             plural=CRD_PLURAL,
             name="raycluster-kuberay",
-            body=[
-                {
-                    "op": "replace",
-                    "path": "/spec/workerGroupSpecs/0/replicas",
-                    "value": 3,
-                }
-            ],
+            body=expected_body,
         )
 
     def test_set_below_min(self, scaler, mock_raycluster):
@@ -64,21 +60,21 @@ class TestScaleSet:
         result = scaler.scale_set("raycluster-kuberay", "workergroup", 0)
         assert result["success"] is False
         assert "below minReplicas" in result["message"]
-        scaler.api.patch_namespaced_custom_object.assert_not_called()
+        scaler.api.replace_namespaced_custom_object.assert_not_called()
 
     def test_set_above_max(self, scaler, mock_raycluster):
         scaler.api.get_namespaced_custom_object.return_value = mock_raycluster
         result = scaler.scale_set("raycluster-kuberay", "workergroup", 10)
         assert result["success"] is False
         assert "exceeds maxReplicas" in result["message"]
-        scaler.api.patch_namespaced_custom_object.assert_not_called()
+        scaler.api.replace_namespaced_custom_object.assert_not_called()
 
     def test_set_group_not_found(self, scaler, mock_raycluster):
         scaler.api.get_namespaced_custom_object.return_value = mock_raycluster
         result = scaler.scale_set("raycluster-kuberay", "nonexistent-group", 3)
         assert result["success"] is False
         assert "not found" in result["message"]
-        scaler.api.patch_namespaced_custom_object.assert_not_called()
+        scaler.api.replace_namespaced_custom_object.assert_not_called()
 
     def test_set_cluster_not_found(self, scaler):
         scaler.api.get_namespaced_custom_object.side_effect = Exception(
@@ -88,9 +84,9 @@ class TestScaleSet:
         assert result["success"] is False
         assert "Failed to get RayCluster" in result["message"]
 
-    def test_set_patch_failure(self, scaler, mock_raycluster):
+    def test_set_replace_failure(self, scaler, mock_raycluster):
         scaler.api.get_namespaced_custom_object.return_value = mock_raycluster
-        scaler.api.patch_namespaced_custom_object.side_effect = Exception("API error")
+        scaler.api.replace_namespaced_custom_object.side_effect = Exception("API error")
         result = scaler.scale_set("raycluster-kuberay", "workergroup", 3)
         assert result["success"] is False
         assert "Failed to patch replicas" in result["message"]
@@ -103,19 +99,15 @@ class TestScaleIncr:
         assert result["success"] is True
         assert result["previous_replicas"] == 2
         assert result["current_replicas"] == 4
-        scaler.api.patch_namespaced_custom_object.assert_called_once_with(
+        expected_body = dict(mock_raycluster)
+        expected_body["spec"]["workerGroupSpecs"][0]["replicas"] = 4
+        scaler.api.replace_namespaced_custom_object.assert_called_once_with(
             group=CRD_GROUP,
             version=CRD_VERSION,
             namespace="default",
             plural=CRD_PLURAL,
             name="raycluster-kuberay",
-            body=[
-                {
-                    "op": "replace",
-                    "path": "/spec/workerGroupSpecs/0/replicas",
-                    "value": 4,
-                }
-            ],
+            body=expected_body,
         )
 
     def test_incr_default_delta(self, scaler, mock_raycluster):
@@ -129,7 +121,7 @@ class TestScaleIncr:
         result = scaler.scale_incr("raycluster-kuberay", "workergroup", 10)
         assert result["success"] is False
         assert "exceeds maxReplicas" in result["message"]
-        scaler.api.patch_namespaced_custom_object.assert_not_called()
+        scaler.api.replace_namespaced_custom_object.assert_not_called()
 
     def test_incr_group_not_found(self, scaler, mock_raycluster):
         scaler.api.get_namespaced_custom_object.return_value = mock_raycluster
@@ -145,19 +137,15 @@ class TestScaleDecr:
         assert result["success"] is True
         assert result["previous_replicas"] == 2
         assert result["current_replicas"] == 1
-        scaler.api.patch_namespaced_custom_object.assert_called_once_with(
+        expected_body = dict(mock_raycluster)
+        expected_body["spec"]["workerGroupSpecs"][0]["replicas"] = 1
+        scaler.api.replace_namespaced_custom_object.assert_called_once_with(
             group=CRD_GROUP,
             version=CRD_VERSION,
             namespace="default",
             plural=CRD_PLURAL,
             name="raycluster-kuberay",
-            body=[
-                {
-                    "op": "replace",
-                    "path": "/spec/workerGroupSpecs/0/replicas",
-                    "value": 1,
-                }
-            ],
+            body=expected_body,
         )
 
     def test_decr_default_delta(self, scaler, mock_raycluster):
@@ -171,7 +159,7 @@ class TestScaleDecr:
         result = scaler.scale_decr("raycluster-kuberay", "workergroup", 5)
         assert result["success"] is False
         assert "below minReplicas" in result["message"]
-        scaler.api.patch_namespaced_custom_object.assert_not_called()
+        scaler.api.replace_namespaced_custom_object.assert_not_called()
 
     def test_decr_group_not_found(self, scaler, mock_raycluster):
         scaler.api.get_namespaced_custom_object.return_value = mock_raycluster

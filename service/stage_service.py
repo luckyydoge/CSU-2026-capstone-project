@@ -46,7 +46,7 @@ class StageService:
                 output_schema=req.output_schema,
                 model_name=req.model_name,
                 config=req.config,
-                dependencies=req.dependencies,
+                dependencies=dict.fromkeys(req.dependencies, None),
                 runtime_env=req.runtime_env,
                 can_split=req.can_split,
                 is_deployable=req.is_deployable

@@ -25,7 +25,7 @@ def listen_stop(stop_flag: threading.Event):
     stop_flag.set()
 
 
-def main(initial_qps: float, target_qps: float, ramp_up_sec: int = 60, duration_sec: int = 300, steady_sec: int = 40):
+def main(initial_qps: float, target_qps: float, ramp_up_sec: int = 60, duration_sec: int = 1000, steady_sec: int = 40):
     ray.init(
         address="ray://127.0.0.1:10001",
         runtime_env={
@@ -74,8 +74,9 @@ def main(initial_qps: float, target_qps: float, ramp_up_sec: int = 60, duration_
 
         submit_time = datetime.now(timezone.utc)
         stage = "load_test"
-        wrapped = monitor(stage_id=stage, submit_time=submit_time.isoformat())(dummy_stage)
-        remote_func = ray.remote(wrapped).options(num_cpus=1, label_selector={"label": "worker"})
+        wrapped = monitor(stage_id=stage, submit_time=submit_time.isoformat(), num_cpus=1)(dummy_stage)
+        remote_func = ray.remote(wrapped).options(num_cpus=0.2, label_selector={"test": "task"})
+#        remote_func = ray.remote(wrapped).options(num_cpus=1, label_selector={"test": "task"})
         ref = remote_func.remote({"seq": seq})
         refs.append(ref)
         seq += 1

@@ -1,8 +1,17 @@
 def run(input_data):
     import io
+    import time
+    
+    start = time.time()
+    tmp = 0
+
+    while time.time() - start < 2:
+        tmp += 1  # 空循环，疯狂占 CPU
+    
     
     file_content = input_data.get("file_content")
     metadata = input_data.get("metadata", {})
+    print(tmp)
     
     if not file_content:
         return {"error": "No file content provided"}

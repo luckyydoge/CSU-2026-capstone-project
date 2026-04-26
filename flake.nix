@@ -31,6 +31,8 @@
 	  pyright
 	  uv
 	  just
+
+	  sqlite
 	  
         ];
 

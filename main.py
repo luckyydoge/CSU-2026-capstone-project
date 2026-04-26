@@ -63,11 +63,13 @@ print("=" * 60)
 
 from api.routes import router as api_router
 from routers import monitor, db_api
+from routers.proxy_router import router as proxy_router
 from monitor.controller import init_controller, get_controller
 from monitor.scheduler import SchedulerController
 
 app = FastAPI(title="协同推理平台 - 端边云协同系统")
 app.include_router(monitor_router)
+app.include_router(proxy_router)
 
 app.add_middleware(
     CORSMiddleware,

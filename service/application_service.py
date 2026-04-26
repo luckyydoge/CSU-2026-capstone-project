@@ -26,7 +26,7 @@ class ApplicationService:
         db_gen = get_db()
         db = next(db_gen)
         try:
-            stage_names = set(req.stages)
+            stage_names = set(stage.name for stage in req.stages)
             for stage_name in stage_names:
                 stage = db.query(Stage).filter(Stage.name == stage_name).first()
                 if not stage:
