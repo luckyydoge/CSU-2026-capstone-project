@@ -1,4 +1,5 @@
 import math
+import re
 import time
 import threading
 import logging
@@ -9,6 +10,10 @@ from typing import Optional
 from app.k8s_scaler import RayClusterScaler
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s"
+)
 
 _controller: Optional["LatencyController"] = None
 
@@ -37,6 +42,22 @@ class LatencyController:
         self.scaler = RayClusterScaler(namespace="default")
         self._last_action: dict = {}
 
+    def _query_vm(self, query: str) -> list:
+        try:
+            r = requests.get(f"{self.prom_url}/api/v1/query", params={"query": query}, timeout=10)
+            r.raise_for_status()
+            return r.json()["data"]["result"]
+        except Exception:
+            return []
+
+    @staticmethod
+    def _parse_window(w: str) -> int:
+        m = re.match(r"(\d+)([smhd])", w)
+        if not m:
+            return 60
+        val, unit = int(m.group(1)), m.group(2)
+        return {"s": 1, "m": 60, "h": 3600, "d": 86400}.get(unit, 1) * val
+
     def _query_pxx(self, stage_cfg: dict) -> dict:
         sid = stage_cfg["stage_id"]
         p = stage_cfg["percentile"]
@@ -59,14 +80,7 @@ class LatencyController:
 
         for key, query in [("queue_time_ms", queue_q), ("latency_ms", lat_q)]:
             try:
-                http_resp = requests.get(
-                    f"{self.prom_url}/api/v1/query",
-                    params={"query": query},
-                    timeout=10,
-                )
-                http_resp.raise_for_status()
-                items = http_resp.json()["data"]["result"]
-                print(items)
+                items = self._query_vm(query)
                 if items:
                     val = float(items[0]["value"][1])
                     result[key] = val if not math.isnan(val) else None
@@ -78,10 +92,54 @@ class LatencyController:
 
         return result
 
+    def _query_resources_pxx(self, stage_cfg: dict) -> dict:
+        sid = stage_cfg["stage_id"]
+        p = stage_cfg["percentile"]
+        w = stage_cfg["window"]
+        result = {"stage_id": sid}
+
+        cpu_q = f'quantile_over_time({p}, proxy_task_cpu_cores{{stage_id="{sid}"}}[{w}])'
+        mem_q = f'quantile_over_time({p}, proxy_task_memory_mb{{stage_id="{sid}"}}[{w}])'
+
+        for key, q in [("cpu_cores_p99", cpu_q), ("memory_mb_p99", mem_q)]:
+            try:
+                items = self._query_vm(q)
+                if items:
+                    val = float(items[0]["value"][1])
+                    result[key] = val if not math.isnan(val) else None
+                else:
+                    result[key] = None
+            except Exception as e:
+                result[key] = None
+                result[f"{key}_error"] = str(e)
+
+        return result
+
+    def _query_qps(self, stage_cfg: dict) -> dict:
+        sid = stage_cfg["stage_id"]
+        w = stage_cfg["window"]
+        window_sec = self._parse_window(w)
+        result = {"stage_id": sid}
+
+        q = f'count(proxy_stage_latency_ms{{stage_id="{sid}"}}[{w}])'
+        try:
+            items = self._query_vm(q)
+            total = float(items[0]["value"][1]) if items else 0
+            result["qps"] = round(total / window_sec, 2) if window_sec > 0 else 0
+            result["total_count"] = int(total)
+        except Exception as e:
+            result["qps"] = None
+            result["qps_error"] = str(e)
+
+        return result
+
     def _run_once(self):
         now = datetime.now(timezone.utc).isoformat()
         for sc in self.stages:
-            self.latest[sc["stage_id"]] = self._query_pxx(sc)
+            sid = sc["stage_id"]
+            self.latest[sid] = self._query_pxx(sc)
+            self.latest[sid].update(self._query_resources_pxx(sc))
+            self.latest[sid].update(self._query_qps(sc))
         self.latest["_meta"] = {"last_updated": now}
         self._evaluate_rules()
         logger.info(f"LatencyController updated at {now}")

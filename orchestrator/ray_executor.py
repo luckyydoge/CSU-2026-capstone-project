@@ -131,7 +131,12 @@ class RayExecutor:
         wrapped_func = RayExecutor._wrap_stage_func(raw_stage_func, target_tier)
 
         start = datetime.utcnow()
-        monitored_func = monitor(stage_id=stage_name, submit_time=start.isoformat())(wrapped_func)
+        monitored_func = monitor(
+            stage_id=stage_name,
+            submit_time=start.isoformat(),
+            num_cpus=cpu,
+            memory_mb=memory_mb,
+        )(wrapped_func)
         remote_func = ray.remote(monitored_func).options(**ray_options)
 
         start_perf = time.perf_counter()

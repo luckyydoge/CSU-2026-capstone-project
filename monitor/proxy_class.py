@@ -104,6 +104,11 @@ def monitor(stage_id: str = "", submit_time: str = "", **ray_kwargs: Any):
 
             tags_vm = {'node_id': node_id, 'stage_id': stage_id, 'worker_group': get_worker_group()}
 
+            cpu_cores = ray_kwargs.get("num_cpus", 0)
+            mem_mb = ray_kwargs.get("memory_mb", 0)
+            push_metric("proxy_task_cpu_cores", cpu_cores, tags_vm)
+            push_metric("proxy_task_memory_mb", mem_mb, tags_vm)
+
             start_ts = time.time()
             start_dt = datetime.utcnow()
 
