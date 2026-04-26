@@ -94,7 +94,7 @@ class RayExecutor:
         return target_tier in allowed_tiers
 
     @staticmethod
-    def _execute_stage(stage_name: str, stage_input: Any, target_tier: str) -> Dict:
+    def _execute_stage(stage_name: str, stage_input: Any, target_tier: str, task_id: str = "") -> Dict:
         """执行单个阶段，返回执行结果"""
         deploy_config = RayExecutor._get_deployment_config(stage_name)
 
@@ -129,7 +129,7 @@ class RayExecutor:
 
         raw_stage_func = get_stage_function(stage_name)
         wrapped_func = RayExecutor._wrap_stage_func(raw_stage_func, target_tier)
-        monitored_func = monitor(submission_id="ray-executor")(wrapped_func)
+        monitored_func = monitor(submission_id=task_id, stage_id=stage_name, task_id=task_id)(wrapped_func)
         remote_func = ray.remote(monitored_func).options(**ray_options)
 
         start = datetime.utcnow()
@@ -311,7 +311,7 @@ class RayExecutor:
                 stage_input = RayExecutor._prepare_stage_input(current_input, current_stage)
                 deploy_config = RayExecutor._get_deployment_config(current_stage)
                 target_tier = deploy_config.get("allowed_tiers", ["edge"])[0]
-                exec_result = RayExecutor._execute_stage(current_stage, stage_input, target_tier)
+                exec_result = RayExecutor._execute_stage(current_stage, stage_input, target_tier, task_id)
 
                 if not exec_result["success"]:
                     trace.error_logs.append(f"Stage {current_stage} failed: {exec_result.get('error')}")
@@ -358,7 +358,7 @@ class RayExecutor:
 
             print(f"[执行] 运行阶段: {current_stage} -> {next_stage}")
             stage_input = RayExecutor._prepare_stage_input(current_input, current_stage)
-            exec_result = RayExecutor._execute_stage(current_stage, stage_input, target_tier)
+            exec_result = RayExecutor._execute_stage(current_stage, stage_input, target_tier, task_id)
 
             if not exec_result["success"]:
                 trace.error_logs.append(f"Stage {current_stage} failed: {exec_result.get('error')}")

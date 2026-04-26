@@ -14,7 +14,8 @@ class SubmissionType(Enum):
     ACTOR = 2
 
 
-def monitor(submission_id: str, proxy_id: Optional[str] = None, **ray_kwargs: Any):
+def monitor(submission_id: str, proxy_id: Optional[str] = None,
+            stage_id: str = "", task_id: str = "", **ray_kwargs: Any):
     def decorator(target: Callable):        
         if isinstance(target, type):
             print("decorator")
@@ -84,22 +85,35 @@ def monitor(submission_id: str, proxy_id: Optional[str] = None, **ray_kwargs: An
             process = psutil.Process(os.getpid())
             func = None
 
-            tags = {'actor_id': proxy_actor_id, 'submission_id': submission_id}
+            import ray
+            try:
+                node_id = ray.get_runtime_context().get_node_id()
+            except Exception:
+                node_id = "unknown"
+
+            tags = {
+                'actor_id': proxy_actor_id,
+                'submission_id': submission_id,
+                'node_id': node_id,
+                'stage_id': stage_id,
+                'task_id': task_id,
+            }
+            tag_keys = ('submission_id', 'actor_id', 'node_id', 'stage_id', 'task_id')
 
             test = Gauge(
                 'proxy_actors',
                 description = 'test',
-                tag_keys=('submission_id', 'actor_id')
+                tag_keys=tag_keys,
             )
             cpu_usage = Gauge(
                 'proxy_actor_cpu_usage',
                 description = 'test',
-                tag_keys=('submission_id', 'actor_id')
+                tag_keys=tag_keys,
             )
             mem_usage = Gauge(
                 'proxy_actor_mem_usage',
                 description = 'test',
-                tag_keys=('submission_id', 'actor_id')
+                tag_keys=tag_keys,
             )
 
             test.set_default_tags(tags)
