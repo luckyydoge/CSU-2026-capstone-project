@@ -35,23 +35,16 @@ class RayClusterScaler:
                 return i, spec
         return -1, None
 
-    def _patch_replicas(
-        self, cluster_name: str, group_index: int, replicas: int
-    ) -> dict:
-        patch = [
-            {
-                "op": "replace",
-                "path": f"/spec/workerGroupSpecs/{group_index}/replicas",
-                "value": replicas,
-            }
-        ]
-        return self.api.patch_namespaced_custom_object(
+    def _replace_replicas(self, cluster_name: str, group_index: int, replicas: int) -> dict:
+        rc = self._get_raycluster(cluster_name)
+        rc["spec"]["workerGroupSpecs"][group_index]["replicas"] = replicas
+        return self.api.replace_namespaced_custom_object(
             group=CRD_GROUP,
             version=CRD_VERSION,
             namespace=self.namespace,
             plural=CRD_PLURAL,
             name=cluster_name,
-            body=patch,
+            body=rc,
         )
 
     def scale_set(self, cluster_name: str, group_name: str, replicas: int) -> dict:
@@ -82,7 +75,7 @@ class RayClusterScaler:
 
         old_replicas = spec.get("replicas", 0)
         try:
-            self._patch_replicas(cluster_name, group_index, replicas)
+            self._replace_replicas(cluster_name, group_index, replicas)
         except Exception as e:
             return {"success": False, "message": f"Failed to patch replicas: {e}"}
 
@@ -119,7 +112,7 @@ class RayClusterScaler:
             }
 
         try:
-            self._patch_replicas(cluster_name, group_index, new_replicas)
+            self._replace_replicas(cluster_name, group_index, new_replicas)
         except Exception as e:
             return {"success": False, "message": f"Failed to patch replicas: {e}"}
 
@@ -159,7 +152,7 @@ class RayClusterScaler:
             }
 
         try:
-            self._patch_replicas(cluster_name, group_index, new_replicas)
+            self._replace_replicas(cluster_name, group_index, new_replicas)
         except Exception as e:
             return {"success": False, "message": f"Failed to patch replicas: {e}"}
 

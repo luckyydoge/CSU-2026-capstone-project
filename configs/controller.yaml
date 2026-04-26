@@ -1,9 +1,28 @@
-prometheus_url: "http://localhost:9090"
-scrape_interval: 30
+prometheus_url: "http://127.0.0.1:9090"
+scrape_interval: 10
 
 stages:
   - stage_id: "load_test"
     worker_label: "worker"
     percentile: 0.99
-    window: "10s"
+    window: "1m"
+    rules:
+      - metric: "queue_time_ms"
+        operator: ">"
+        threshold: 500
+        cooldown: 60
+        actions:
+          - type: "scale_incr"
+            cluster_name: "raycluster-kuberay"
+            group_name: "workergroup"
+            delta: 1
 
+      - metric: "queue_time_ms"
+        operator: "<"
+        threshold: 100
+        cooldown: 120
+        actions:
+          - type: "scale_decr"
+            cluster_name: "raycluster-kuberay"
+            group_name: "workergroup"
+            delta: 1
