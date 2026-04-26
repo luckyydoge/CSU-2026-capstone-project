@@ -1,111 +1,204 @@
-# service/deployment_service.py
-from typing import Dict, Optional, List
-from models.deployment import DeploymentConfigCreateRequest, ResourceRequirements, Tier
-from storage.memory_store import STAGE_DB, DEPLOYMENT_DB
+from typing import Dict, Optional
+from models.deployment import DeploymentConfigCreateRequest
+from app.database import SessionLocal
+from app.schemas import DeploymentConfigCreate
+from app.models import DeploymentConfig, Stage
+from sqlalchemy.orm import Session
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 
 class DeploymentService:
-
+    # ========== 内部管理 DB 的接口（供 /api/v1/ 使用） ==========
     @staticmethod
-    def _validate_tiers(tiers: List[Tier]) -> None:
-        """校验逻辑层级列表是否合法"""
-        valid_tiers = {"end", "edge", "cloud"}
-        for t in tiers:
-            if t not in valid_tiers:
-                raise ValueError(f"非法逻辑层级: {t}，允许值: end, edge, cloud")
-        if not tiers:
-            raise ValueError("allowed_tiers 不能为空")
-
-    @staticmethod
-    def _validate_resources(res: ResourceRequirements) -> None:
-        """校验资源需求"""
-        if res.cpu_cores <= 0:
-            raise ValueError("cpu_cores 必须大于 0")
-        if res.memory_mb <= 0:
-            raise ValueError("memory_mb 必须大于 0")
-        if res.gpu_count < 0:
-            raise ValueError("gpu_count 不能为负数")
-        if res.gpu_memory_mb is not None and res.gpu_memory_mb <= 0:
-            raise ValueError("gpu_memory_mb 必须大于 0（如果提供）")
-
-    @staticmethod
-    def validate(req: DeploymentConfigCreateRequest) -> None:
-        """完整校验部署配置"""
-        # 1. 阶段必须已注册
-        if req.stage_name not in STAGE_DB:
-            raise ValueError(f"阶段 '{req.stage_name}' 未注册，请先注册阶段")
-
-        # 2. 校验 allowed_tiers
-        DeploymentService._validate_tiers(req.allowed_tiers)
-
-        # 3. 校验资源需求
-        DeploymentService._validate_resources(req.resources)
-
-        # 4. 校验副本数
-        if req.replicas < 1:
-            raise ValueError("replicas 必须 >= 1")
-
-        # 5. 可选：校验 node_affinity 中的节点名称或标签格式（简单示例）
-        if req.node_affinity:
-            if req.node_affinity.node_names and not all(isinstance(n, str) for n in req.node_affinity.node_names):
-                raise ValueError("node_names 必须是字符串列表")
-            if req.node_affinity.match_labels and not isinstance(req.node_affinity.match_labels, dict):
-                raise ValueError("match_labels 必须是字典")
-
-        # 6. 可选：校验 proximity 中的目标阶段是否存在
-        if req.proximity:
-            if req.proximity.target_stage not in STAGE_DB:
-                raise ValueError(f"邻近部署的目标阶段 '{req.proximity.target_stage}' 未注册")
+    def validate(req: DeploymentConfigCreateRequest):
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            stage = db.query(Stage).filter(Stage.name == req.stage_name).first()
+            if not stage:
+                raise ValueError(f"Stage not found: {req.stage_name}")
+            if not req.allowed_tiers:
+                raise ValueError("allowed_tiers required")
+            if not req.resources:
+                raise ValueError("resources required")
+        finally:
+            db_gen.close()
 
     @staticmethod
     def create_deployment(req: DeploymentConfigCreateRequest) -> Dict:
-        """创建部署配置（一个阶段只能有一个）"""
         DeploymentService.validate(req)
-
-        if req.stage_name in DEPLOYMENT_DB:
-            raise ValueError(f"阶段 '{req.stage_name}' 已存在部署配置，请使用更新接口")
-
-        # 存储为字典
-        DEPLOYMENT_DB[req.stage_name] = req.dict()
-        return {
-            "stage_name": req.stage_name,
-            "message": "Deployment configuration created successfully"
-        }
+        
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            config_create = DeploymentConfigCreate(
+                stage_name=req.stage_name,
+                allowed_tiers=req.allowed_tiers,
+                resources=req.resources,
+                replicas=req.replicas,
+                node_affinity=req.node_affinity,
+                proximity=req.proximity,
+                description=req.description
+            )
+            return DeploymentService._create_deployment_db(db, config_create)
+        finally:
+            db_gen.close()
 
     @staticmethod
     def get_deployment(stage_name: str) -> Optional[Dict]:
-        """根据阶段名称获取部署配置"""
-        return DEPLOYMENT_DB.get(stage_name)
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            config = DeploymentService._get_deployment_db(db, stage_name)
+            if config:
+                return {
+                    "stage_name": config.stage_name,
+                    "allowed_tiers": config.allowed_tiers,
+                    "resources": config.resources,
+                    "replicas": config.replicas,
+                    "node_affinity": config.node_affinity,
+                    "proximity": config.proximity,
+                    "description": config.description
+                }
+            return None
+        finally:
+            db_gen.close()
 
     @staticmethod
     def list_deployments() -> Dict:
-        """列出所有部署配置（键为阶段名）"""
-        return DEPLOYMENT_DB
-
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            configs = DeploymentService._list_deployments_db(db)
+            result = {}
+            for name, config in configs.items():
+                result[name] = {
+                    "stage_name": config.stage_name,
+                    "allowed_tiers": config.allowed_tiers,
+                    "resources": config.resources,
+                    "replicas": config.replicas,
+                    "node_affinity": config.node_affinity,
+                    "proximity": config.proximity,
+                    "description": config.description
+                }
+            return result
+        finally:
+            db_gen.close()
+    
     @staticmethod
     def update_deployment(stage_name: str, req: DeploymentConfigCreateRequest) -> Dict:
-        """更新部署配置（阶段必须已存在配置）"""
-        if stage_name not in DEPLOYMENT_DB:
-            raise ValueError(f"阶段 '{stage_name}' 的部署配置不存在，无法更新")
-
-        # 校验时要求阶段名称与传入的 stage_name 一致
-        if req.stage_name != stage_name:
-            raise ValueError("请求中的 stage_name 与路径参数不匹配")
-
-        DeploymentService.validate(req)
-
-        DEPLOYMENT_DB[stage_name] = req.dict()
-        return {
-            "stage_name": stage_name,
-            "message": "Deployment configuration updated successfully"
-        }
-
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            config_create = DeploymentConfigCreate(
+                stage_name=req.stage_name,
+                allowed_tiers=req.allowed_tiers,
+                resources=req.resources,
+                replicas=req.replicas,
+                node_affinity=req.node_affinity,
+                proximity=req.proximity,
+                description=req.description
+            )
+            return DeploymentService._update_deployment_db(db, stage_name, config_create)
+        finally:
+            db_gen.close()
+    
     @staticmethod
     def delete_deployment(stage_name: str) -> Dict:
-        """删除部署配置"""
-        if stage_name not in DEPLOYMENT_DB:
-            raise ValueError(f"阶段 '{stage_name}' 的部署配置不存在")
-        del DEPLOYMENT_DB[stage_name]
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            return DeploymentService._delete_deployment_db(db, stage_name)
+        finally:
+            db_gen.close()
+    
+    # ========== 外部传入 DB 的接口（供 /db/v1/ 使用） ==========
+    @staticmethod
+    def _validate_db(db: Session, req: DeploymentConfigCreate):
+        stage = db.query(Stage).filter(Stage.name == req.stage_name).first()
+        if not stage:
+            raise ValueError(f"Stage not found: {req.stage_name}")
+        if not req.allowed_tiers:
+            raise ValueError("allowed_tiers required")
+        if not req.resources:
+            raise ValueError("resources required")
+    
+    @staticmethod
+    def _create_deployment_db(db: Session, req: DeploymentConfigCreate):
+        DeploymentService._validate_db(db, req)
+        
+        existing = db.query(DeploymentConfig).filter(DeploymentConfig.stage_name == req.stage_name).first()
+        if existing:
+            raise ValueError(f"Deployment config already exists for stage: {req.stage_name}")
+        
+        config = DeploymentConfig(
+            stage_name=req.stage_name,
+            allowed_tiers=req.allowed_tiers,
+            resources=req.resources,
+            replicas=req.replicas,
+            node_affinity=req.node_affinity,
+            proximity=req.proximity,
+            description=req.description
+        )
+        
+        db.add(config)
+        db.commit()
+        db.refresh(config)
+        
+        return {
+            "stage_name": config.stage_name,
+            "message": "Deployment config registered successfully"
+        }
+    
+    @staticmethod
+    def _get_deployment_db(db: Session, stage_name: str) -> Optional[DeploymentConfig]:
+        return db.query(DeploymentConfig).filter(DeploymentConfig.stage_name == stage_name).first()
+    
+    @staticmethod
+    def _list_deployments_db(db: Session) -> Dict:
+        configs = db.query(DeploymentConfig).all()
+        return {config.stage_name: config for config in configs}
+    
+    @staticmethod
+    def _update_deployment_db(db: Session, stage_name: str, req: DeploymentConfigCreate):
+        existing = db.query(DeploymentConfig).filter(DeploymentConfig.stage_name == stage_name).first()
+        if not existing:
+            raise ValueError(f"Deployment config not found for stage: {stage_name}")
+        
+        DeploymentService._validate_db(db, req)
+        
+        existing.allowed_tiers = req.allowed_tiers
+        existing.resources = req.resources
+        existing.replicas = req.replicas
+        existing.node_affinity = req.node_affinity
+        existing.proximity = req.proximity
+        existing.description = req.description
+        
+        db.commit()
+        db.refresh(existing)
+        
+        return {
+            "stage_name": existing.stage_name,
+            "message": "Deployment config updated successfully"
+        }
+    
+    @staticmethod
+    def _delete_deployment_db(db: Session, stage_name: str):
+        config = db.query(DeploymentConfig).filter(DeploymentConfig.stage_name == stage_name).first()
+        if not config:
+            raise ValueError(f"Deployment config not found for stage: {stage_name}")
+        
+        db.delete(config)
+        db.commit()
+        
         return {
             "stage_name": stage_name,
-            "message": "Deployment configuration deleted successfully"
+            "message": "Deployment config deleted successfully"
         }

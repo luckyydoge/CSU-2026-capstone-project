@@ -7,6 +7,8 @@ def run(input_data):
     if not file_content:
         return {"error": "No file content provided"}
     
+    print(f"[resize_20] 收到文件内容，长度={len(file_content)} bytes")
+    
     try:
         from PIL import Image
         import base64
@@ -34,6 +36,15 @@ def run(input_data):
                 "new_size": resized_image.size,
                 "resize_ratio": 0.8,
                 "format": format_str
+            }
+        }
+    except ImportError as e:
+        print(f"[resize_20] PIL 不可用，直接返回原始文件内容: {e}")
+        return {
+            "file_content": file_content,
+            "metadata": {
+                "note": "PIL not available, returned original content",
+                "original_size": len(file_content)
             }
         }
     except Exception as e:

@@ -1,55 +1,188 @@
 from typing import Dict, Optional
 from models.strategy import StrategyCreateRequest
-from storage.memory_store import STRATEGY_DB
+from app.database import SessionLocal
+from app.schemas import StrategyCreate
+from app.models import Strategy
+from sqlalchemy.orm import Session
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 
 class StrategyService:
-
+    # ========== 内部管理 DB 的接口（供 /api/v1/ 使用） ==========
     @staticmethod
     def validate(req: StrategyCreateRequest):
-        if not req.name or not req.name.strip():
-            raise ValueError("策略名称不能为空")
-        if req.strategy_type not in ("routing", "split", "fallback"):
-            raise ValueError("strategy_type 必须是 routing, split 或 fallback")
-        if not req.handler or ('.' not in req.handler and ':' not in req.handler):
-            raise ValueError("handler 格式错误，应为 module.function 或 module:ClassName")
+        if not req.name:
+            raise ValueError("Strategy name required")
+        if not req.strategy_type:
+            raise ValueError("Strategy type required")
+        if not req.handler:
+            raise ValueError("Handler required")
+        if ":" not in req.handler:
+            raise ValueError("Handler must be in format 'module:function'")
 
     @staticmethod
     def create_strategy(req: StrategyCreateRequest) -> Dict:
         StrategyService.validate(req)
-        if req.name in STRATEGY_DB:
-            raise ValueError(f"策略 '{req.name}' 已存在")
-        STRATEGY_DB[req.name] = req.dict()
-        return {
-            "strategy_name": req.name,
-            "message": "Strategy registered successfully"
-        }
+        
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            strategy_create = StrategyCreate(
+                name=req.name,
+                strategy_type=req.strategy_type,
+                handler=req.handler,
+                config=req.config,
+                description=req.description
+            )
+            return StrategyService._create_strategy_db(db, strategy_create)
+        finally:
+            db_gen.close()
 
     @staticmethod
     def get_strategy(name: str) -> Optional[Dict]:
-        return STRATEGY_DB.get(name)
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            strategy = StrategyService._get_strategy_db(db, name)
+            if strategy:
+                return {
+                    "name": strategy.name,
+                    "strategy_type": strategy.strategy_type,
+                    "handler": strategy.handler,
+                    "config": strategy.config,
+                    "description": strategy.description
+                }
+            return None
+        finally:
+            db_gen.close()
 
     @staticmethod
     def list_strategies() -> Dict:
-        return STRATEGY_DB
-
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            strategies = StrategyService._list_strategies_db(db)
+            result = {}
+            for name, strategy in strategies.items():
+                result[name] = {
+                    "name": strategy.name,
+                    "strategy_type": strategy.strategy_type,
+                    "handler": strategy.handler,
+                    "config": strategy.config,
+                    "description": strategy.description
+                }
+            return result
+        finally:
+            db_gen.close()
+    
     @staticmethod
     def update_strategy(name: str, req: StrategyCreateRequest) -> Dict:
-        if name not in STRATEGY_DB:
-            raise ValueError(f"策略 '{name}' 不存在")
-        if req.name != name:
-            raise ValueError("请求中的策略名称与路径参数不匹配")
-        StrategyService.validate(req)
-        STRATEGY_DB[name] = req.dict()
-        return {
-            "strategy_name": name,
-            "message": "Strategy updated successfully"
-        }
-
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            strategy_create = StrategyCreate(
+                name=req.name,
+                strategy_type=req.strategy_type,
+                handler=req.handler,
+                config=req.config,
+                description=req.description
+            )
+            return StrategyService._update_strategy_db(db, name, strategy_create)
+        finally:
+            db_gen.close()
+    
     @staticmethod
     def delete_strategy(name: str) -> Dict:
-        if name not in STRATEGY_DB:
-            raise ValueError(f"策略 '{name}' 不存在")
-        del STRATEGY_DB[name]
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            return StrategyService._delete_strategy_db(db, name)
+        finally:
+            db_gen.close()
+    
+    # ========== 外部传入 DB 的接口（供 /db/v1/ 使用） ==========
+    @staticmethod
+    def _validate_db(req: StrategyCreate):
+        if not req.name:
+            raise ValueError("Strategy name required")
+        if not req.strategy_type:
+            raise ValueError("Strategy type required")
+        if not req.handler:
+            raise ValueError("Handler required")
+        if ":" not in req.handler:
+            raise ValueError("Handler must be in format 'module:function'")
+    
+    @staticmethod
+    def _create_strategy_db(db: Session, req: StrategyCreate):
+        StrategyService._validate_db(req)
+        
+        existing = db.query(Strategy).filter(Strategy.name == req.name).first()
+        if existing:
+            raise ValueError(f"Strategy already exists: {req.name}")
+        
+        strategy = Strategy(
+            name=req.name,
+            strategy_type=req.strategy_type,
+            handler=req.handler,
+            config=req.config,
+            description=req.description
+        )
+        
+        db.add(strategy)
+        db.commit()
+        db.refresh(strategy)
+        
+        return {
+            "strategy_name": strategy.name,
+            "message": "Strategy registered successfully"
+        }
+    
+    @staticmethod
+    def _get_strategy_db(db: Session, name: str) -> Optional[Strategy]:
+        return db.query(Strategy).filter(Strategy.name == name).first()
+    
+    @staticmethod
+    def _list_strategies_db(db: Session) -> Dict:
+        strategies = db.query(Strategy).all()
+        return {strategy.name: strategy for strategy in strategies}
+    
+    @staticmethod
+    def _update_strategy_db(db: Session, name: str, req: StrategyCreate):
+        existing = db.query(Strategy).filter(Strategy.name == name).first()
+        if not existing:
+            raise ValueError(f"Strategy not found: {name}")
+        
+        StrategyService._validate_db(req)
+        
+        existing.strategy_type = req.strategy_type
+        existing.handler = req.handler
+        existing.config = req.config
+        existing.description = req.description
+        
+        db.commit()
+        db.refresh(existing)
+        
+        return {
+            "strategy_name": existing.name,
+            "message": "Strategy updated successfully"
+        }
+    
+    @staticmethod
+    def _delete_strategy_db(db: Session, name: str):
+        strategy = db.query(Strategy).filter(Strategy.name == name).first()
+        if not strategy:
+            raise ValueError(f"Strategy not found: {name}")
+        
+        db.delete(strategy)
+        db.commit()
+        
         return {
             "strategy_name": name,
             "message": "Strategy deleted successfully"

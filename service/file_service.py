@@ -1,8 +1,9 @@
 import os
 import uuid
-import shutil
-from datetime import datetime
 from typing import Dict, List, Optional
+from app.database import SessionLocal
+from app.models import File as FileModel
+
 
 class FileService:
     UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
@@ -13,6 +14,7 @@ class FileService:
 
     @staticmethod
     def save_file(filename: str, content: bytes) -> Dict:
+        FileService.init()
         file_id = str(uuid.uuid4())
         ext = os.path.splitext(filename)[1] if filename else ""
         stored_filename = f"{file_id}{ext}"
@@ -21,24 +23,50 @@ class FileService:
         with open(file_path, "wb") as f:
             f.write(content)
 
-        file_info = {
-            "file_id": file_id,
-            "original_filename": filename,
-            "stored_filename": stored_filename,
-            "file_path": file_path,
-            "size": len(content),
-            "upload_time": datetime.utcnow().isoformat()
-        }
+        # 保存到数据库
+        db = SessionLocal()
+        try:
+            db_file = FileModel(
+                file_id=file_id,
+                filename=filename,
+                file_type="application/octet-stream",
+                size_bytes=len(content),
+                file_path=file_path
+            )
+            db.add(db_file)
+            db.commit()
+            db.refresh(db_file)
 
-        from storage.memory_store import FILE_DB
-        FILE_DB[file_id] = file_info
-
-        return file_info
+            return {
+                "file_id": db_file.file_id,
+                "original_filename": db_file.filename,
+                "stored_filename": stored_filename,
+                "file_path": db_file.file_path,
+                "size": db_file.size_bytes,
+                "upload_time": db_file.created_at.isoformat() if db_file.created_at else None
+            }
+        finally:
+            db.close()
 
     @staticmethod
     def get_file(file_id: str) -> Optional[Dict]:
-        from storage.memory_store import FILE_DB
-        return FILE_DB.get(file_id)
+        db = SessionLocal()
+        try:
+            db_file = db.query(FileModel).filter(FileModel.file_id == file_id).first()
+            if db_file:
+                ext = os.path.splitext(db_file.filename)[1] if db_file.filename else ""
+                stored_filename = f"{db_file.file_id}{ext}"
+                return {
+                    "file_id": db_file.file_id,
+                    "original_filename": db_file.filename,
+                    "stored_filename": stored_filename,
+                    "file_path": db_file.file_path,
+                    "size": db_file.size_bytes,
+                    "upload_time": db_file.created_at.isoformat() if db_file.created_at else None
+                }
+            return None
+        finally:
+            db.close()
 
     @staticmethod
     def get_file_path(file_id: str) -> Optional[str]:
@@ -49,23 +77,43 @@ class FileService:
 
     @staticmethod
     def delete_file(file_id: str) -> bool:
-        file_info = FileService.get_file(file_id)
-        if not file_info:
-            return False
-
+        db = SessionLocal()
         try:
-            if os.path.exists(file_info["file_path"]):
-                os.remove(file_info["file_path"])
-            from storage.memory_store import FILE_DB
-            FILE_DB.pop(file_id, None)
-            return True
-        except Exception:
-            return False
+            db_file = db.query(FileModel).filter(FileModel.file_id == file_id).first()
+            if not db_file:
+                return False
+
+            try:
+                if os.path.exists(db_file.file_path):
+                    os.remove(db_file.file_path)
+                db.delete(db_file)
+                db.commit()
+                return True
+            except Exception:
+                return False
+        finally:
+            db.close()
 
     @staticmethod
     def list_files() -> List[Dict]:
-        from storage.memory_store import FILE_DB
-        return list(FILE_DB.values())
+        db = SessionLocal()
+        try:
+            db_files = db.query(FileModel).all()
+            result = []
+            for db_file in db_files:
+                ext = os.path.splitext(db_file.filename)[1] if db_file.filename else ""
+                stored_filename = f"{db_file.file_id}{ext}"
+                result.append({
+                    "file_id": db_file.file_id,
+                    "original_filename": db_file.filename,
+                    "stored_filename": stored_filename,
+                    "file_path": db_file.file_path,
+                    "size": db_file.size_bytes,
+                    "upload_time": db_file.created_at.isoformat() if db_file.created_at else None
+                })
+            return result
+        finally:
+            db.close()
 
     @staticmethod
     def get_file_content(file_id: str) -> Optional[bytes]:
@@ -74,5 +122,6 @@ class FileService:
             with open(file_path, "rb") as f:
                 return f.read()
         return None
+
 
 FileService.init()

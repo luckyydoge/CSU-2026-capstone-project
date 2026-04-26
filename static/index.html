@@ -6,586 +6,1782 @@
     <title>端-边-云协同推理实验平台</title>
     <style>
         * {
+            margin: 0;
+            padding: 0;
             box-sizing: border-box;
         }
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #f5f7fb;
-            color: #1e293b;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #f0f2f5;
+            color: #333;
         }
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-        h1 {
-            margin-bottom: 0.5rem;
-        }
-        .subtitle {
-            color: #475569;
-            margin-bottom: 2rem;
-            border-left: 4px solid #3b82f6;
-            padding-left: 1rem;
-        }
-        .tabs {
+        /* 侧边栏样式 */
+        .layout {
             display: flex;
-            flex-wrap: wrap;
-            gap: 0.5rem;
-            margin-bottom: 1.5rem;
-            border-bottom: 1px solid #cbd5e1;
-            padding-bottom: 0.5rem;
+            min-height: 100vh;
         }
-        .tab-btn {
-            background: none;
-            border: none;
-            padding: 0.6rem 1.2rem;
-            font-size: 1rem;
-            cursor: pointer;
-            border-radius: 8px;
-            transition: all 0.2s;
-            color: #475569;
-        }
-        .tab-btn.active {
-            background-color: #3b82f6;
+        .sidebar {
+            width: 260px;
+            background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
             color: white;
-        }
-        .tab-btn:hover:not(.active) {
-            background-color: #e2e8f0;
-        }
-        .tab-pane {
-            display: none;
-            background: white;
-            border-radius: 16px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            padding: 1.5rem;
-            margin-bottom: 2rem;
-        }
-        .tab-pane.active {
-            display: block;
-        }
-        .form-row {
             display: flex;
-            flex-wrap: wrap;
-            gap: 1rem;
-            margin-bottom: 1rem;
-            align-items: flex-end;
+            flex-direction: column;
+            position: fixed;
+            height: 100vh;
+            left: 0;
+            top: 0;
+            box-shadow: 2px 0 8px rgba(0,0,0,0.1);
+            z-index: 100;
         }
-        .form-group {
+        .sidebar-header {
+            padding: 24px 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .sidebar-header h1 {
+            font-size: 18px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .sidebar-nav {
             flex: 1;
-            min-width: 180px;
+            padding: 20px 12px;
         }
-        label {
-            display: block;
-            font-weight: 600;
-            margin-bottom: 0.3rem;
-            font-size: 0.85rem;
-        }
-        input, select, textarea {
-            width: 100%;
-            padding: 0.5rem;
-            border: 1px solid #cbd5e1;
-            border-radius: 8px;
-            font-family: monospace;
-            font-size: 0.9rem;
-        }
-        button {
-            background-color: #3b82f6;
-            color: white;
-            border: none;
-            padding: 0.5rem 1rem;
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
             border-radius: 8px;
             cursor: pointer;
-            font-weight: 600;
-            transition: 0.2s;
+            color: #94a3b8;
+            transition: all 0.2s;
+            margin-bottom: 4px;
+            text-decoration: none;
         }
-        button:hover {
-            background-color: #2563eb;
+        .nav-item:hover {
+            background-color: rgba(255,255,255,0.08);
+            color: white;
         }
-        button.danger {
-            background-color: #ef4444;
+        .nav-item.active {
+            background-color: #3b82f6;
+            color: white;
         }
-        button.danger:hover {
-            background-color: #dc2626;
+        .nav-icon {
+            font-size: 18px;
+        }
+        /* 主内容区 */
+        .main-content {
+            flex: 1;
+            margin-left: 260px;
+            padding: 28px 32px;
+        }
+        .page-header {
+            margin-bottom: 24px;
+        }
+        .page-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 4px;
+        }
+        .page-subtitle {
+            color: #64748b;
+            font-size: 14px;
+        }
+        /* 卡片样式 */
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+        /* 表格样式 */
+        .table-container {
+            overflow-x: auto;
         }
         table {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 1rem;
         }
         th, td {
-            border: 1px solid #e2e8f0;
-            padding: 0.6rem;
             text-align: left;
-            vertical-align: top;
+            padding: 14px 16px;
+            border-bottom: 1px solid #f1f5f9;
         }
         th {
-            background-color: #f1f5f9;
+            background-color: #f8fafc;
+            font-weight: 600;
+            color: #475569;
+            font-size: 13px;
         }
-        pre {
-            background: #f1f5f9;
-            padding: 0.5rem;
+        td {
+            color: #334155;
+            font-size: 14px;
+        }
+        tr:hover td {
+            background-color: #f8fafc;
+        }
+        /* 按钮样式 */
+        .btn {
+            padding: 10px 18px;
             border-radius: 8px;
-            overflow-x: auto;
-            font-size: 0.8rem;
+            border: none;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
         }
-        .card {
-            background: #f8fafc;
-            border-radius: 12px;
-            padding: 1rem;
-            margin-top: 1rem;
+        .btn-primary {
+            background-color: #3b82f6;
+            color: white;
         }
-        .flex-between {
+        .btn-primary:hover {
+            background-color: #2563eb;
+        }
+        .btn-secondary {
+            background-color: #f1f5f9;
+            color: #475569;
+        }
+        .btn-secondary:hover {
+            background-color: #e2e8f0;
+        }
+        .btn-info {
+            background-color: #0ea5e9;
+            color: white;
+        }
+        /* 头部操作区 */
+        .page-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        /* 弹窗样式 */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0,0,0,0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal-overlay.active {
+            display: flex;
+        }
+        .modal {
+            background: white;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 700px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid #f1f5f9;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
-        .badge {
-            background-color: #e2e8f0;
-            padding: 0.2rem 0.5rem;
-            border-radius: 20px;
-            font-size: 0.75rem;
+        .modal-title {
+            font-size: 18px;
+            font-weight: 700;
         }
-        hr {
-            margin: 1rem 0;
-        }
-        .json-editor {
-            font-family: monospace;
-            white-space: pre-wrap;
-        }
-        .message {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: #1e293b;
-            color: white;
-            padding: 0.5rem 1rem;
+        .modal-close {
+            width: 32px;
+            height: 32px;
             border-radius: 8px;
-            z-index: 1000;
+            border: none;
+            background: #f1f5f9;
+            cursor: pointer;
+            font-size: 18px;
+        }
+        .modal-body {
+            padding: 24px;
+        }
+        .modal-footer {
+            padding: 16px 24px;
+            border-top: 1px solid #f1f5f9;
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+        /* 表单样式 */
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        .form-group {
+            margin-bottom: 16px;
+        }
+        .form-row .form-group {
+            margin-bottom: 0;
+        }
+        label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: #475569;
+            margin-bottom: 6px;
+        }
+        label .required {
+            color: #ef4444;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59,130,246,0.1);
+        }
+        textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+        /* 详情页样式 */
+        .detail-item {
+            padding: 12px 0;
+            border-bottom: 1px solid #f1f5f9;
+        }
+        .detail-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #94a3b8;
+            margin-bottom: 4px;
+        }
+        .detail-value {
+            font-size: 14px;
+            color: #334155;
+        }
+        .detail-value code {
+            background: #f1f5f9;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        /* 消息提示 */
+        .toast {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            padding: 14px 20px;
+            border-radius: 8px;
+            color: white;
+            font-size: 14px;
+            z-index: 2000;
             opacity: 0;
-            transition: opacity 0.3s;
+            transform: translateY(-10px);
+            transition: all 0.3s;
+        }
+        .toast.active {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .toast.success {
+            background-color: #10b981;
+        }
+        .toast.error {
+            background-color: #ef4444;
+        }
+        /* 状态标签 */
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .badge-success {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+        .badge-warning {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+        .badge-info {
+            background-color: #dbeafe;
+            color: #1e40af;
+        }
+        .badge-error {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+        /* 隐藏模块 */
+        .module {
+            display: none;
+        }
+        .module.active {
+            display: block;
         }
     </style>
 </head>
 <body>
-<div class="container">
-    <h1>🧠 端-边-云协同推理实验平台</h1>
-    <div class="subtitle">应用注册 · 阶段管理 · 部署配置 · 策略插拔 · 任务执行与追踪</div>
+    <div class="layout">
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1>
+                    <span>🧠</span>
+                    协同推理平台
+                </h1>
+            </div>
+            <nav class="sidebar-nav">
+                <div class="nav-item active" data-module="stages">
+                    <span class="nav-icon">📦</span>
+                    <span>阶段管理</span>
+                </div>
+                <div class="nav-item" data-module="apps">
+                    <span class="nav-icon">📱</span>
+                    <span>应用管理</span>
+                </div>
+                <div class="nav-item" data-module="deploy">
+                    <span class="nav-icon">⚙️</span>
+                    <span>部署配置</span>
+                </div>
+                <div class="nav-item" data-module="strategies">
+                    <span class="nav-icon">🧩</span>
+                    <span>策略管理</span>
+                </div>
+                <div class="nav-item" data-module="submit">
+                    <span class="nav-icon">🚀</span>
+                    <span>任务提交</span>
+                </div>
+                <div class="nav-item" data-module="records">
+                    <span class="nav-icon">📊</span>
+                    <span>任务记录</span>
+                </div>
+                <div class="nav-item" data-module="trace">
+                    <span class="nav-icon">🔍</span>
+                    <span>任务追踪</span>
+                </div>
+            </nav>
+        </aside>
 
-    <div class="tabs">
-        <button class="tab-btn active" data-tab="stages">📦 阶段管理</button>
-        <button class="tab-btn" data-tab="apps">📱 应用管理</button>
-        <button class="tab-btn" data-tab="deploy">⚙️ 部署配置</button>
-        <button class="tab-btn" data-tab="strategies">🧠 策略管理</button>
-        <button class="tab-btn" data-tab="tasks">🚀 任务提交</button>
-        <button class="tab-btn" data-tab="results">📊 任务记录</button>
-        <button class="tab-btn" data-tab="trace">🔍 追踪详情</button>
+        <!-- 主内容 -->
+        <main class="main-content">
+            <!-- 阶段管理模块 -->
+            <div id="module-stages" class="module active">
+                <div class="page-header">
+                    <h2 class="page-title">阶段管理</h2>
+                    <p class="page-subtitle">管理所有可执行的处理阶段</p>
+                </div>
+                <div class="page-actions">
+                    <div></div>
+                    <button class="btn btn-primary" onclick="openStageModal()">
+                        ➕ 添加阶段
+                    </button>
+                </div>
+                <div class="card">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>阶段名称</th>
+                                    <th>描述</th>
+                                    <th>输入类型</th>
+                                    <th>输出类型</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="stages-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 应用管理模块 -->
+            <div id="module-apps" class="module">
+                <div class="page-header">
+                    <h2 class="page-title">应用管理</h2>
+                    <p class="page-subtitle">管理协同推理应用</p>
+                </div>
+                <div class="page-actions">
+                    <div></div>
+                    <button class="btn btn-primary" onclick="openAppModal()">
+                        ➕ 添加应用
+                    </button>
+                </div>
+                <div class="card">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>应用名称</th>
+                                    <th>描述</th>
+                                    <th>输入类型</th>
+                                    <th>入口阶段</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="apps-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 部署配置模块 -->
+            <div id="module-deploy" class="module">
+                <div class="page-header">
+                    <h2 class="page-title">部署配置</h2>
+                    <p class="page-subtitle">配置阶段的部署约束</p>
+                </div>
+                <div class="page-actions">
+                    <div></div>
+                    <button class="btn btn-primary" onclick="openDeployModal()">
+                        ➕ 添加配置
+                    </button>
+                </div>
+                <div class="card">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>阶段名称</th>
+                                    <th>描述</th>
+                                    <th>允许层级</th>
+                                    <th>副本数</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="deploy-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 策略管理模块 -->
+            <div id="module-strategies" class="module">
+                <div class="page-header">
+                    <h2 class="page-title">策略管理</h2>
+                    <p class="page-subtitle">管理路径选择和协同决策策略</p>
+                </div>
+                <div class="page-actions">
+                    <div></div>
+                    <button class="btn btn-primary" onclick="openStrategyModal()">
+                        ➕ 添加策略
+                    </button>
+                </div>
+                <div class="card">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>策略名称</th>
+                                    <th>类型</th>
+                                    <th>描述</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="strategies-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 任务提交模块 -->
+            <div id="module-submit" class="module">
+                <div class="page-header">
+                    <h2 class="page-title">任务提交</h2>
+                    <p class="page-subtitle">提交协同推理任务</p>
+                </div>
+                <div class="card">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>选择应用 <span class="required">*</span></label>
+                            <select id="submit-app"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>选择策略 <span class="required">*</span></label>
+                            <select id="submit-strategy"></select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>上传文件</label>
+                        <input type="file" id="submit-file">
+                    </div>
+                    <button class="btn btn-primary" onclick="submitTask()">▶️ 提交任务</button>
+                    <div style="margin-top:24px;">
+                        <h3 style="font-size:16px; font-weight:600; margin-bottom:12px;">任务状态</h3>
+                        <div id="task-status-area" class="card" style="padding:16px; margin:0;">
+                            等待提交任务...
+                        </div>
+                    </div>
+                    <div style="margin-top:24px;">
+                        <h3 style="font-size:16px; font-weight:600; margin-bottom:12px;">执行结果</h3>
+                        <div id="task-result-area" class="card" style="padding:16px; margin:0;">
+                            暂无结果
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 任务记录模块 -->
+            <div id="module-records" class="module">
+                <div class="page-header">
+                    <h2 class="page-title">任务记录</h2>
+                    <p class="page-subtitle">查看历史任务</p>
+                </div>
+                <div class="card">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>任务ID</th>
+                                    <th>应用</th>
+                                    <th>策略</th>
+                                    <th>状态</th>
+                                    <th>创建时间</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="records-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 任务追踪模块 -->
+            <div id="module-trace" class="module">
+                <div class="page-header">
+                    <h2 class="page-title">任务追踪</h2>
+                    <p class="page-subtitle">查看任务的完整执行链路</p>
+                </div>
+                <div class="card">
+                    <div class="form-group">
+                        <label>输入任务ID <span class="required">*</span></label>
+                        <input type="text" id="trace-task-id" placeholder="请输入任务ID">
+                    </div>
+                    <button class="btn btn-primary" onclick="loadTrace()">🔍 查询追踪</button>
+                    <div id="trace-content" style="margin-top:24px;"></div>
+                </div>
+            </div>
+        </main>
     </div>
 
-    <!-- 阶段管理 -->
-    <div id="stages" class="tab-pane active">
-        <div class="flex-between"><h3>注册新阶段</h3><button onclick="resetAll()" class="danger">🗑️ 重置所有数据</button></div>
-        <div class="form-row">
-            <div class="form-group"><label>阶段名称 *</label><input type="text" id="stageName" placeholder="例如 preprocess"></div>
-            <div class="form-group"><label>Handler (module:function)</label><input type="text" id="stageHandler" value="test_dummy:run"></div>
-            <div class="form-group"><label>输入类型 *</label><input type="text" id="stageInputType" placeholder="image/json"></div>
-            <div class="form-group"><label>输出类型 *</label><input type="text" id="stageOutputType" placeholder="feature"></div>
+    <!-- 添加阶段弹窗 -->
+    <div id="stage-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">添加阶段</div>
+                <button class="modal-close" onclick="closeModal('stage-modal')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>阶段名称 <span class="required">*</span></label>
+                        <input type="text" id="stage-name" placeholder="例如 resize_10">
+                    </div>
+                    <div class="form-group">
+                        <label>Handler <span class="required">*</span></label>
+                        <input type="text" id="stage-handler" placeholder="module:function">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>输入类型 <span class="required">*</span></label>
+                        <input type="text" id="stage-input-type" placeholder="例如 image">
+                    </div>
+                    <div class="form-group">
+                        <label>输出类型 <span class="required">*</span></label>
+                        <input type="text" id="stage-output-type" placeholder="例如 image">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>描述</label>
+                    <input type="text" id="stage-desc" placeholder="阶段功能描述">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>模型名称</label>
+                        <input type="text" id="stage-model" placeholder="关联的模型名称">
+                    </div>
+                    <div class="form-group">
+                        <label>依赖</label>
+                        <input type="text" id="stage-deps" placeholder="numpy, torch (逗号分隔)">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>配置 (JSON)</label>
+                    <textarea id="stage-config" placeholder='{"param": "value"}'></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>输入格式 (JSON Schema)</label>
+                        <textarea id="stage-input-schema" placeholder='{"type": "object"}'></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>输出格式 (JSON Schema)</label>
+                        <textarea id="stage-output-schema" placeholder='{"type": "object"}'></textarea>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>运行环境 (JSON)</label>
+                        <textarea id="stage-runtime" placeholder='{"env": "value"}'></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>可拆分</label>
+                        <select id="stage-can-split">
+                            <option value="false">否</option>
+                            <option value="true">是</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>可部署</label>
+                    <select id="stage-is-deployable">
+                        <option value="true">是</option>
+                        <option value="false">否</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('stage-modal')">取消</button>
+                <button class="btn btn-primary" onclick="createStage()">保存</button>
+            </div>
         </div>
-        <div class="form-row">
-            <div class="form-group"><label>描述</label><input type="text" id="stageDesc"></div>
-            <div class="form-group"><label>模型名称(可选)</label><input type="text" id="stageModel"></div>
-            <div class="form-group"><label>依赖 (逗号分隔)</label><input type="text" id="stageDeps" placeholder="numpy,torch"></div>
-            <div class="form-group"><label>配置 JSON</label><input type="text" id="stageConfig" value="{}"></div>
+    </div>
+
+    <!-- 添加应用弹窗 -->
+    <div id="app-modal" class="modal-overlay">
+        <div class="modal" style="max-width: 800px;">
+            <div class="modal-header">
+                <div class="modal-title">添加应用</div>
+                <button class="modal-close" onclick="closeModal('app-modal')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>应用名称 <span class="required">*</span></label>
+                        <input type="text" id="app-name" placeholder="例如 image_process_app">
+                    </div>
+                    <div class="form-group">
+                        <label>输入类型 <span class="required">*</span></label>
+                        <input type="text" id="app-input-type" placeholder="例如 image">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>描述</label>
+                    <input type="text" id="app-desc" placeholder="应用功能描述">
+                </div>
+                <div class="form-group">
+                    <label>阶段列表 (JSON数组) <span class="required">*</span></label>
+                    <textarea id="app-stages" rows="3" placeholder='["resize_10", "resize_20", "image_output"]'></textarea>
+                </div>
+                <div class="form-group">
+                    <label>边列表 (JSON数组) <span class="required">*</span></label>
+                    <textarea id="app-edges" rows="3" placeholder='[{"from_stage": "resize_10", "to_stage": "resize_20"}, {"from_stage": "resize_20", "to_stage": "image_output"}]'></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>入口阶段 <span class="required">*</span></label>
+                        <select id="app-entry-stage"></select>
+                    </div>
+                    <div class="form-group">
+                        <label>出口阶段 (JSON数组) <span class="required">*</span></label>
+                        <textarea id="app-exit-stages" rows="1" placeholder='["image_output"]'></textarea>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('app-modal')">取消</button>
+                <button class="btn btn-primary" onclick="createApp()">保存</button>
+            </div>
         </div>
-        <button onclick="createStage()">➕ 注册阶段</button>
-        <hr>
-        <h3>已注册阶段</h3>
-        <table id="stagesTable"><thead><tr><th>名称</th><th>Handler</th><th>输入类型</th><th>输出类型</th><th>操作</th></tr></thead><tbody></tbody></table>
     </div>
 
-    <!-- 应用管理 -->
-    <div id="apps" class="tab-pane">
-        <h3>注册新应用</h3>
-        <div class="form-row">
-            <div class="form-group"><label>应用名称 *</label><input type="text" id="appName"></div>
-            <div class="form-group"><label>输入类型</label><input type="text" id="appInputType" value="raw"></div>
-            <div class="form-group"><label>入口阶段</label><input type="text" id="appEntry"></div>
-            <div class="form-group"><label>出口阶段 (JSON数组)</label><input type="text" id="appExits" value='["output"]'></div>
+    <!-- 应用详情弹窗 -->
+    <div id="app-detail-modal" class="modal-overlay">
+        <div class="modal" style="max-width: 900px;">
+            <div class="modal-header">
+                <div class="modal-title">应用详情</div>
+                <button class="modal-close" onclick="closeModal('app-detail-modal')">×</button>
+            </div>
+            <div class="modal-body" id="app-detail-content"></div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('app-detail-modal')">关闭</button>
+            </div>
         </div>
-        <div class="form-group"><label>阶段列表 (JSON: [{"name":"stage1","output_type":"type1"},...])</label><textarea id="appStages" rows="3" style="font-family:monospace;">[{"name":"data_ingest","output_type":"prepared"},{"name":"preprocess","output_type":"features"},{"name":"light_inference","output_type":"label"},{"name":"output","output_type":"result"}]</textarea></div>
-        <div class="form-group"><label>边列表 (JSON: [{"from_stage":"a","to_stage":"b"},...])</label><textarea id="appEdges" rows="3" style="font-family:monospace;">[{"from_stage":"data_ingest","to_stage":"preprocess"},{"from_stage":"preprocess","to_stage":"light_inference"},{"from_stage":"light_inference","to_stage":"output"}]</textarea></div>
-        <button onclick="createApp()">📌 注册应用</button>
-        <hr>
-        <h3>已注册应用</h3>
-        <table id="appsTable"><thead><tr><th>应用ID</th><th>名称</th><th>入口</th><th>出口</th><th>操作</th></tr></thead><tbody></tbody></table>
     </div>
 
-    <!-- 部署配置 -->
-    <div id="deploy" class="tab-pane">
-        <h3>配置阶段部署</h3>
-        <div class="form-row">
-            <div class="form-group"><label>阶段名称</label><input type="text" id="deployStage"></div>
-            <div class="form-group"><label>允许层级 (JSON数组)</label><input type="text" id="deployTiers" value='["end","edge"]'></div>
-            <div class="form-group"><label>CPU核数</label><input type="number" id="deployCpu" value="0.5" step="0.1"></div>
-            <div class="form-group"><label>内存(MB)</label><input type="number" id="deployMem" value="256"></div>
+    <!-- 添加部署配置弹窗 -->
+    <div id="deploy-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">添加部署配置</div>
+                <button class="modal-close" onclick="closeModal('deploy-modal')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>阶段名称 <span class="required">*</span></label>
+                    <select id="deploy-stage-name"></select>
+                </div>
+                <div class="form-group">
+                    <label>描述</label>
+                    <input type="text" id="deploy-desc" placeholder="部署配置描述">
+                </div>
+                <div class="form-group">
+                    <label>允许层级 (JSON数组) <span class="required">*</span></label>
+                    <textarea id="deploy-allowed-tiers" rows="1" placeholder='["end", "edge", "cloud"]'></textarea>
+                </div>
+                <div class="form-group">
+                    <label>资源需求 (JSON) <span class="required">*</span></label>
+                    <textarea id="deploy-resources" rows="2" placeholder='{"cpu_cores": 0.5, "memory_mb": 256, "gpu_count": 0}'></textarea>
+                </div>
+                <div class="form-group">
+                    <label>副本数 <span class="required">*</span></label>
+                    <input type="number" id="deploy-replicas" value="1" min="1">
+                </div>
+                <div class="form-group">
+                    <label>节点亲和 (JSON)</label>
+                    <textarea id="deploy-node-affinity" rows="2" placeholder='{"zone": "us-east-1"}'></textarea>
+                </div>
+                <div class="form-group">
+                    <label>邻近部署 (JSON)</label>
+                    <textarea id="deploy-proximity" rows="2" placeholder='{"preferred_stages": ["resize_10"]}'></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('deploy-modal')">取消</button>
+                <button class="btn btn-primary" onclick="createDeployment()">保存</button>
+            </div>
         </div>
-        <div class="form-row">
-            <div class="form-group"><label>GPU数量</label><input type="number" id="deployGpu" value="0"></div>
-            <div class="form-group"><label>副本数</label><input type="number" id="deployReplicas" value="1"></div>
-            <div class="form-group"><label>描述</label><input type="text" id="deployDesc"></div>
+    </div>
+
+    <!-- 部署配置详情弹窗 -->
+    <div id="deploy-detail-modal" class="modal-overlay">
+        <div class="modal" style="max-width: 800px;">
+            <div class="modal-header">
+                <div class="modal-title">部署配置详情</div>
+                <button class="modal-close" onclick="closeModal('deploy-detail-modal')">×</button>
+            </div>
+            <div class="modal-body" id="deploy-detail-content"></div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('deploy-detail-modal')">关闭</button>
+            </div>
         </div>
-        <button onclick="createDeployment()">⚙️ 保存部署配置</button>
-        <hr>
-        <h3>现有部署配置</h3>
-        <table id="deployTable"><thead><tr><th>阶段名称</th><th>允许层级</th><th>资源</th><th>副本</th><th>操作</th></tr></thead><tbody></tbody></table>
     </div>
 
-    <!-- 策略管理 -->
-    <div id="strategies" class="tab-pane">
-        <h3>注册策略</h3>
-        <div class="form-row">
-            <div class="form-group"><label>策略名称 *</label><input type="text" id="strategyName"></div>
-            <div class="form-group"><label>类型</label><select id="strategyType"><option>routing</option><option>split</option><option>fallback</option></select></div>
-            <div class="form-group"><label>Handler (module:function)</label><input type="text" id="strategyHandler" value="strategies.random_routing:decide"></div>
+    <!-- 阶段详情弹窗 -->
+    <div id="stage-detail-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">阶段详情</div>
+                <button class="modal-close" onclick="closeModal('stage-detail-modal')">×</button>
+            </div>
+            <div class="modal-body" id="stage-detail-content"></div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('stage-detail-modal')">关闭</button>
+            </div>
         </div>
-        <div class="form-group"><label>配置 JSON</label><textarea id="strategyConfig" rows="2">{}</textarea></div>
-        <div class="form-group"><label>描述</label><input type="text" id="strategyDesc"></div>
-        <button onclick="createStrategy()">🧩 注册策略</button>
-        <hr>
-        <h3>已注册策略</h3>
-        <table id="strategiesTable"><thead><tr><th>名称</th><th>类型</th><th>Handler</th><th>配置</th></tr></thead><tbody></tbody></table>
     </div>
-
-    <!-- 任务提交 -->
-    <div id="tasks" class="tab-pane">
-        <h3>提交推理任务</h3>
-        <div class="form-row">
-            <div class="form-group"><label>选择应用</label><select id="taskAppSelect"></select></div>
-            <div class="form-group"><label>选择策略</label><select id="taskStrategySelect"></select></div>
-            <div class="form-group"><label>输入数据 (任意JSON)</label><input type="text" id="taskInput" value="hello_world"></div>
+    
+    <!-- 添加策略弹窗 -->
+    <div id="strategy-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">添加策略</div>
+                <button class="modal-close" onclick="closeModal('strategy-modal')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>策略名称 <span class="required">*</span></label>
+                    <input type="text" id="strategy-name" placeholder="例如 simple_path">
+                </div>
+                <div class="form-group">
+                    <label>策略类型 <span class="required">*</span></label>
+                    <select id="strategy-type">
+                        <option value="path">路径选择</option>
+                        <option value="split">任务切分</option>
+                        <option value="fallback">回退策略</option>
+                        <option value="custom">自定义</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Handler <span class="required">*</span></label>
+                    <input type="text" id="strategy-handler" placeholder="module:function">
+                </div>
+                <div class="form-group">
+                    <label>描述</label>
+                    <input type="text" id="strategy-desc" placeholder="策略功能描述">
+                </div>
+                <div class="form-group">
+                    <label>策略参数 (JSON)</label>
+                    <textarea id="strategy-params" rows="3" placeholder='{"param": "value"}'></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('strategy-modal')">取消</button>
+                <button class="btn btn-primary" onclick="createStrategy()">保存</button>
+            </div>
         </div>
-        <button onclick="submitTask()">▶️ 执行任务</button>
-        <div id="taskResult" class="card" style="display:none; margin-top:1rem;"></div>
+    </div>
+    
+    <!-- 策略详情弹窗 -->
+    <div id="strategy-detail-modal" class="modal-overlay">
+        <div class="modal" style="max-width: 800px;">
+            <div class="modal-header">
+                <div class="modal-title">策略详情</div>
+                <button class="modal-close" onclick="closeModal('strategy-detail-modal')">×</button>
+            </div>
+            <div class="modal-body" id="strategy-detail-content"></div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('strategy-detail-modal')">关闭</button>
+            </div>
+        </div>
     </div>
 
-    <!-- 任务记录 -->
-    <div id="results" class="tab-pane">
-        <h3>历史任务</h3>
-        <button onclick="loadTasks()">🔄 刷新任务列表</button>
-        <table id="tasksListTable"><thead><tr><th>任务ID</th><th>应用</th><th>策略</th><th>状态</th><th>完成时间</th><th>最终输出</th><th>操作</th></tr></thead><tbody></tbody></table>
-    </div>
+    <!-- 消息提示 -->
+    <div id="toast" class="toast"></div>
 
-    <!-- 追踪详情 -->
-    <div id="trace" class="tab-pane">
-        <h3>执行追踪</h3>
-        <div class="form-group"><label>输入任务ID</label><input type="text" id="traceTaskId" placeholder="例如 e8e0311d-..."></div>
-        <button onclick="fetchTrace()">🔍 获取追踪</button>
-        <pre id="traceContent" style="margin-top:1rem;"></pre>
-    </div>
-</div>
-<div id="message" class="message"></div>
-
-<script>
-    const API_BASE = '/api/v1';
-    let currentStages = [];
-
-    function showMessage(msg, isError = false) {
-        const el = document.getElementById('message');
-        el.textContent = msg;
-        el.style.backgroundColor = isError ? '#dc2626' : '#1e293b';
-        el.style.opacity = '1';
-        setTimeout(() => el.style.opacity = '0', 2500);
-    }
-
-    async function apiCall(url, method, body = null) {
-        const opts = { method, headers: { 'Content-Type': 'application/json' } };
-        if (body) opts.body = JSON.stringify(body);
-        const res = await fetch(API_BASE + url, opts);
-        if (!res.ok) {
-            const text = await res.text();
-            throw new Error(`${res.status}: ${text}`);
-        }
-        return res.json();
-    }
-
-    // 阶段管理
-    async function createStage() {
-        const name = document.getElementById('stageName').value.trim();
-        const handler = document.getElementById('stageHandler').value.trim();
-        const input_type = document.getElementById('stageInputType').value.trim();
-        const output_type = document.getElementById('stageOutputType').value.trim();
-        if (!name || !handler || !input_type || !output_type) return showMessage('请填写名称、handler、输入输出类型', true);
-        const dependencies = document.getElementById('stageDeps').value.split(',').map(s=>s.trim()).filter(s=>s);
-        let config = {};
-        try { config = JSON.parse(document.getElementById('stageConfig').value); } catch(e) {}
-        const body = { name, handler, input_type, output_type, description: document.getElementById('stageDesc').value, model_name: document.getElementById('stageModel').value, dependencies, config, can_split: false, is_deployable: true };
-        try {
-            await apiCall('/stages', 'POST', body);
-            showMessage('阶段注册成功');
-            loadStages();
-        } catch(e) { showMessage('注册失败: '+e.message, true); }
-    }
-    async function loadStages() {
-        try {
-            const data = await apiCall('/stages', 'GET');
-            const tbody = document.querySelector('#stagesTable tbody');
-            tbody.innerHTML = '';
-            for (const [name, stage] of Object.entries(data)) {
-                const row = tbody.insertRow();
-                row.insertCell(0).textContent = name;
-                row.insertCell(1).textContent = stage.handler;
-                row.insertCell(2).textContent = stage.input_type;
-                row.insertCell(3).textContent = stage.output_type;
-                const delBtn = document.createElement('button');
-                delBtn.textContent = '删除';
-                delBtn.onclick = () => deleteStage(name);
-                row.insertCell(4).appendChild(delBtn);
-            }
-            currentStages = Object.keys(data);
-            refreshAppStageSelects();
-        } catch(e) { console.error(e); }
-    }
-    async function deleteStage(name) {
-        if(!confirm(`删除阶段 ${name} ？`)) return;
-        try {
-            await apiCall(`/stages/${name}`, 'DELETE');
-            showMessage('删除成功');
-            loadStages();
-        } catch(e) { showMessage('删除失败', true); }
-    }
-
-    // 应用管理
-    async function createApp() {
-        const name = document.getElementById('appName').value.trim();
-        const input_type = document.getElementById('appInputType').value.trim();
-        const entry_stage = document.getElementById('appEntry').value.trim();
-        let exit_stages, stages, edges;
-        try { exit_stages = JSON.parse(document.getElementById('appExits').value); } catch(e) { return showMessage('出口阶段JSON无效', true); }
-        try { stages = JSON.parse(document.getElementById('appStages').value); } catch(e) { return showMessage('阶段列表JSON无效', true); }
-        try { edges = JSON.parse(document.getElementById('appEdges').value); } catch(e) { return showMessage('边JSON无效', true); }
-        if(!name || !entry_stage) return showMessage('请填写应用名称和入口阶段', true);
-        const body = { name, input_type, stages, edges, entry_stage, exit_stages };
-        try {
-            const res = await apiCall('/applications', 'POST', body);
-            showMessage('应用注册成功, ID: '+res.app_id);
-            loadApps();
-        } catch(e) { showMessage('注册失败: '+e.message, true); }
-    }
-    async function loadApps() {
-        try {
-            const data = await apiCall('/applications', 'GET');
-            const tbody = document.querySelector('#appsTable tbody');
-            tbody.innerHTML = '';
-            for (const [id, app] of Object.entries(data)) {
-                const row = tbody.insertRow();
-                row.insertCell(0).textContent = id;
-                row.insertCell(1).textContent = app.name;
-                row.insertCell(2).textContent = app.entry_stage;
-                row.insertCell(3).textContent = JSON.stringify(app.exit_stages);
-                const delBtn = document.createElement('button');
-                delBtn.textContent = '删除';
-                delBtn.onclick = () => deleteApp(id);
-                row.insertCell(4).appendChild(delBtn);
-            }
-            refreshTaskAppSelect();
-        } catch(e) { console.error(e); }
-    }
-    async function deleteApp(id) {
-        if(!confirm(`删除应用 ${id}？`)) return;
-        try {
-            await apiCall(`/applications/${id}`, 'DELETE');
-            loadApps();
-        } catch(e) { showMessage('删除失败', true); }
-    }
-
-    // 部署配置
-    async function createDeployment() {
-        const stage_name = document.getElementById('deployStage').value.trim();
-        if(!stage_name) return showMessage('阶段名称不能为空', true);
-        let allowed_tiers;
-        try { allowed_tiers = JSON.parse(document.getElementById('deployTiers').value); } catch(e) { return showMessage('allowed_tiers JSON无效', true); }
-        const resources = { cpu_cores: parseFloat(document.getElementById('deployCpu').value), memory_mb: parseInt(document.getElementById('deployMem').value), gpu_count: parseInt(document.getElementById('deployGpu').value) };
-        const replicas = parseInt(document.getElementById('deployReplicas').value);
-        const body = { stage_name, allowed_tiers, resources, replicas, description: document.getElementById('deployDesc').value };
-        try {
-            await apiCall('/deployments', 'POST', body);
-            showMessage('部署配置保存成功');
-            loadDeployments();
-        } catch(e) { showMessage('保存失败: '+e.message, true); }
-    }
-    async function loadDeployments() {
-        try {
-            const data = await apiCall('/deployments', 'GET');
-            const tbody = document.querySelector('#deployTable tbody');
-            tbody.innerHTML = '';
-            for (const [stage, dep] of Object.entries(data)) {
-                const row = tbody.insertRow();
-                row.insertCell(0).textContent = stage;
-                row.insertCell(1).textContent = JSON.stringify(dep.allowed_tiers);
-                row.insertCell(2).textContent = `${dep.resources.cpu_cores}CPU / ${dep.resources.memory_mb}MB / GPU${dep.resources.gpu_count}`;
-                row.insertCell(3).textContent = dep.replicas;
-                const delBtn = document.createElement('button');
-                delBtn.textContent = '删除';
-                delBtn.onclick = () => deleteDeployment(stage);
-                row.insertCell(4).appendChild(delBtn);
-            }
-        } catch(e) { console.error(e); }
-    }
-    async function deleteDeployment(stage) {
-        if(!confirm(`删除部署配置 ${stage}？`)) return;
-        try {
-            await apiCall(`/deployments/${stage}`, 'DELETE');
-            loadDeployments();
-        } catch(e) { showMessage('删除失败', true); }
-    }
-
-    // 策略管理
-    async function createStrategy() {
-        const name = document.getElementById('strategyName').value.trim();
-        const strategy_type = document.getElementById('strategyType').value;
-        const handler = document.getElementById('strategyHandler').value.trim();
-        let config = {};
-        try { config = JSON.parse(document.getElementById('strategyConfig').value); } catch(e) {}
-        const description = document.getElementById('strategyDesc').value;
-        if(!name || !handler) return showMessage('名称和handler不能为空', true);
-        const body = { name, strategy_type, handler, config, description };
-        try {
-            await apiCall('/strategies', 'POST', body);
-            showMessage('策略注册成功');
-            loadStrategies();
-            refreshTaskStrategySelect();
-        } catch(e) { showMessage('注册失败: '+e.message, true); }
-    }
-    async function loadStrategies() {
-        try {
-            const data = await apiCall('/strategies', 'GET');
-            const tbody = document.querySelector('#strategiesTable tbody');
-            tbody.innerHTML = '';
-            for (const [name, s] of Object.entries(data)) {
-                const row = tbody.insertRow();
-                row.insertCell(0).textContent = name;
-                row.insertCell(1).textContent = s.strategy_type;
-                row.insertCell(2).textContent = s.handler;
-                row.insertCell(3).textContent = JSON.stringify(s.config);
-            }
-        } catch(e) { console.error(e); }
-    }
-
-    // 任务提交
-    async function submitTask() {
-        const application_name = document.getElementById('taskAppSelect').value;
-        const strategy_name = document.getElementById('taskStrategySelect').value;
-        const input_data = document.getElementById('taskInput').value;
-        if(!application_name || !strategy_name) return showMessage('请选择应用和策略', true);
-        try {
-            const res = await apiCall('/tasks', 'POST', { application_name, strategy_name, input_data, runtime_config: {} });
-            showMessage(`任务已提交，ID: ${res.task_id}`);
-            document.getElementById('taskResult').style.display = 'block';
-            document.getElementById('taskResult').innerHTML = `<strong>任务ID:</strong> ${res.task_id}<br><strong>状态:</strong> ${res.status}<br><strong>创建时间:</strong> ${res.created_at}<br>等待几秒后查看结果...`;
-            setTimeout(() => {
-                fetchTaskDetail(res.task_id).then(task => {
-                    document.getElementById('taskResult').innerHTML = `<strong>任务详情</strong><pre>${JSON.stringify(task, null, 2)}</pre>`;
-                    loadTasks(); // 刷新任务列表
-                });
-            }, 2000);
-        } catch(e) { showMessage('提交失败: '+e.message, true); }
-    }
-    async function fetchTaskDetail(taskId) {
-        const res = await fetch(`${API_BASE}/tasks/${taskId}`);
-        if(!res.ok) throw new Error('获取任务失败');
-        return res.json();
-    }
-    async function loadTasks() {
-        try {
-            const data = await apiCall('/tasks', 'GET');
-            const tbody = document.querySelector('#tasksListTable tbody');
-            tbody.innerHTML = '';
-            for (const [id, task] of Object.entries(data)) {
-                const row = tbody.insertRow();
-                row.insertCell(0).textContent = id;
-                row.insertCell(1).textContent = task.application_name;
-                row.insertCell(2).textContent = task.strategy_name;
-                row.insertCell(3).textContent = task.status;
-                row.insertCell(4).textContent = task.completed_at || '-';
-                row.insertCell(5).textContent = task.final_output ? JSON.stringify(task.final_output).slice(0,50) : '-';
-                const btn = document.createElement('button');
-                btn.textContent = '查看Trace';
-                btn.onclick = () => viewTrace(id);
-                row.insertCell(6).appendChild(btn);
-            }
-        } catch(e) { console.error(e); }
-    }
-    function viewTrace(taskId) {
-        document.getElementById('traceTaskId').value = taskId;
-        document.querySelector('.tab-btn[data-tab="trace"]').click();
-        fetchTrace();
-    }
-    async function fetchTrace() {
-        const taskId = document.getElementById('traceTaskId').value.trim();
-        if(!taskId) return showMessage('请输入任务ID', true);
-        try {
-            const trace = await apiCall(`/results/${taskId}/trace`, 'GET');
-            document.getElementById('traceContent').textContent = JSON.stringify(trace, null, 2);
-        } catch(e) { document.getElementById('traceContent').textContent = `获取失败: ${e.message}`; }
-    }
-
-    // 辅助刷新下拉框
-    function refreshAppStageSelects() {}
-    function refreshTaskAppSelect() {
-        const select = document.getElementById('taskAppSelect');
-        fetch(`${API_BASE}/applications`).then(res=>res.json()).then(data => {
-            select.innerHTML = '<option value="">--选择应用--</option>';
-            for (const [id, app] of Object.entries(data)) {
-                const opt = document.createElement('option');
-                opt.value = app.name;
-                opt.textContent = `${app.name} (${id})`;
-                select.appendChild(opt);
-            }
-        }).catch(console.error);
-    }
-    function refreshTaskStrategySelect() {
-        const select = document.getElementById('taskStrategySelect');
-        fetch(`${API_BASE}/strategies`).then(res=>res.json()).then(data => {
-            select.innerHTML = '<option value="">--选择策略--</option>';
-            for (const [name] of Object.entries(data)) {
-                const opt = document.createElement('option');
-                opt.value = name;
-                opt.textContent = name;
-                select.appendChild(opt);
-            }
-        }).catch(console.error);
-    }
-
-    // 重置所有数据
-    async function resetAll() {
-        if(!confirm('⚠️ 将清除所有阶段、应用、部署、策略、任务和追踪数据，不可恢复。确定吗？')) return;
-        try {
-            await fetch('/debug/reset', { method: 'POST' });
-            showMessage('所有数据已重置');
-            loadStages(); loadApps(); loadDeployments(); loadStrategies(); loadTasks();
-            refreshTaskAppSelect(); refreshTaskStrategySelect();
-        } catch(e) { showMessage('重置失败', true); }
-    }
-
-    // 标签页切换
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const tabId = btn.getAttribute('data-tab');
-            document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-            document.getElementById(tabId).classList.add('active');
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            if(tabId === 'stages') loadStages();
-            if(tabId === 'apps') loadApps();
-            if(tabId === 'deploy') loadDeployments();
-            if(tabId === 'strategies') loadStrategies();
-            if(tabId === 'results') loadTasks();
+    <script>
+        const API_BASE = '/api/v1';
+        
+        // ============= 导航切换 =============
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const moduleId = item.dataset.module;
+                
+                // 切换导航激活状态
+                document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+                item.classList.add('active');
+                
+                // 切换模块显示
+                document.querySelectorAll('.module').forEach(el => el.classList.remove('active'));
+                document.getElementById(`module-${moduleId}`).classList.add('active');
+                
+                // 加载对应模块数据
+                if (moduleId === 'stages') loadStages();
+                if (moduleId === 'apps') loadApps();
+                if (moduleId === 'deploy') loadDeployments();
+                if (moduleId === 'strategies') loadStrategies();
+                if (moduleId === 'submit') loadSubmitOptions();
+                if (moduleId === 'records') loadRecords();
+            });
         });
-    });
 
-    // 初始加载
-    loadStages(); loadApps(); loadDeployments(); loadStrategies(); loadTasks();
-    refreshTaskAppSelect(); refreshTaskStrategySelect();
-</script>
+        // ============= 通用 API 调用 =============
+        async function apiCall(url, method = 'GET', body = null) {
+            const options = {
+                method,
+                headers: { 'Content-Type': 'application/json' }
+            };
+            if (body) options.body = JSON.stringify(body);
+            
+            const response = await fetch(API_BASE + url, options);
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`${response.status}: ${text}`);
+            }
+            return response.json();
+        }
+
+        // ============= Toast 消息 =============
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast ${type} active`;
+            setTimeout(() => toast.classList.remove('active'), 3000);
+        }
+
+        // ============= 格式化东八区（北京时间）时间 =============
+        function formatBeijingTime(dateStr) {
+            if (!dateStr) return '-';
+            const date = new Date(dateStr);
+            // 使用 Intl.DateTimeFormat 确保显示东八区时间
+            return date.toLocaleString('zh-CN', {
+                timeZone: 'Asia/Shanghai',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        // ============= 弹窗控制 =============
+        function openModal(modalId) {
+            document.getElementById(modalId).classList.add('active');
+        }
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('active');
+        }
+
+        // ============= 阶段管理模块 =============
+        async function loadStages() {
+            try {
+                const data = await apiCall('/stages', 'GET');
+                const tbody = document.getElementById('stages-table-body');
+                tbody.innerHTML = '';
+                for (const [name, stage] of Object.entries(data)) {
+                    const row = tbody.insertRow();
+                    row.insertCell().textContent = name;
+                    row.insertCell().textContent = stage.description || '-';
+                    row.insertCell().textContent = stage.input_type;
+                    row.insertCell().textContent = stage.output_type;
+                    
+                    const actions = row.insertCell();
+                    const detailBtn = document.createElement('button');
+                    detailBtn.className = 'btn btn-info';
+                    detailBtn.textContent = '详情';
+                    detailBtn.style.marginRight = '8px';
+                    detailBtn.onclick = () => showStageDetail(name);
+                    actions.appendChild(detailBtn);
+                }
+            } catch (e) {
+                console.error(e);
+                showToast('加载阶段失败: ' + e.message, 'error');
+            }
+        }
+
+        function openStageModal() {
+            // 清空表单
+            document.getElementById('stage-name').value = '';
+            document.getElementById('stage-handler').value = '';
+            document.getElementById('stage-input-type').value = '';
+            document.getElementById('stage-output-type').value = '';
+            document.getElementById('stage-desc').value = '';
+            document.getElementById('stage-model').value = '';
+            document.getElementById('stage-deps').value = '';
+            document.getElementById('stage-config').value = '{}';
+            document.getElementById('stage-input-schema').value = '';
+            document.getElementById('stage-output-schema').value = '';
+            document.getElementById('stage-runtime').value = '{}';
+            document.getElementById('stage-can-split').value = 'false';
+            document.getElementById('stage-is-deployable').value = 'true';
+            openModal('stage-modal');
+        }
+
+        async function createStage() {
+            const name = document.getElementById('stage-name').value.trim();
+            const handler = document.getElementById('stage-handler').value.trim();
+            const input_type = document.getElementById('stage-input-type').value.trim();
+            const output_type = document.getElementById('stage-output-type').value.trim();
+            
+            if (!name || !handler || !input_type || !output_type) {
+                showToast('请填写必填字段', 'error');
+                return;
+            }
+            
+            const dependencies = document.getElementById('stage-deps').value.split(',')
+                .map(s => s.trim()).filter(s => s);
+            
+            let config = {};
+            try { config = JSON.parse(document.getElementById('stage-config').value || '{}'); } catch(e) {}
+            
+            let input_schema = null;
+            try { input_schema = JSON.parse(document.getElementById('stage-input-schema').value || 'null'); } catch(e) {}
+            
+            let output_schema = null;
+            try { output_schema = JSON.parse(document.getElementById('stage-output-schema').value || 'null'); } catch(e) {}
+            
+            let runtime_env = {};
+            try { runtime_env = JSON.parse(document.getElementById('stage-runtime').value || '{}'); } catch(e) {}
+            
+            const body = {
+                name,
+                handler,
+                input_type,
+                output_type,
+                description: document.getElementById('stage-desc').value,
+                model_name: document.getElementById('stage-model').value || null,
+                dependencies,
+                config,
+                input_schema,
+                output_schema,
+                runtime_env,
+                can_split: document.getElementById('stage-can-split').value === 'true',
+                is_deployable: document.getElementById('stage-is-deployable').value === 'true'
+            };
+            
+            try {
+                await apiCall('/stages', 'POST', body);
+                showToast('阶段创建成功');
+                closeModal('stage-modal');
+                loadStages();
+            } catch (e) {
+                showToast('创建阶段失败: ' + e.message, 'error');
+            }
+        }
+
+        async function showStageDetail(name) {
+            try {
+                const data = await apiCall('/stages', 'GET');
+                const stage = data[name];
+                if (!stage) {
+                    showToast('阶段不存在', 'error');
+                    return;
+                }
+                
+                // 查询部署配置
+                let deployConfig = null;
+                try {
+                    const deployData = await apiCall('/deployments', 'GET');
+                    deployConfig = deployData[name];
+                } catch (e) {}
+                
+                const content = document.getElementById('stage-detail-content');
+                content.innerHTML = `
+                    <div class="detail-item">
+                        <div class="detail-label">阶段名称</div>
+                        <div class="detail-value">${name}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">描述</div>
+                        <div class="detail-value">${stage.description || '-'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Handler</div>
+                        <div class="detail-value"><code>${stage.handler}</code></div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">输入类型</div>
+                        <div class="detail-value">${stage.input_type}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">输出类型</div>
+                        <div class="detail-value">${stage.output_type}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">模型名称</div>
+                        <div class="detail-value">${stage.model_name || '-'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">依赖</div>
+                        <div class="detail-value">${(stage.dependencies || []).join(', ') || '-'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">配置</div>
+                        <div class="detail-value"><code>${JSON.stringify(stage.config || {}, null, 2)}</code></div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">输入格式 (Schema)</div>
+                        <div class="detail-value"><code>${JSON.stringify(stage.input_schema || {}, null, 2)}</code></div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">输出格式 (Schema)</div>
+                        <div class="detail-value"><code>${JSON.stringify(stage.output_schema || {}, null, 2)}</code></div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">运行环境</div>
+                        <div class="detail-value"><code>${JSON.stringify(stage.runtime_env || {}, null, 2)}</code></div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">可拆分</div>
+                        <div class="detail-value">${stage.can_split ? '是' : '否'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">可部署</div>
+                        <div class="detail-value">${stage.is_deployable ? '是' : '否'}</div>
+                    </div>
+                    ${deployConfig ? `
+                        <div class="detail-item" style="margin-top: 12px; padding-top:12px; border-top: 2px solid #f1f5f9;">
+                            <div class="detail-label" style="font-size:14px; color:#334155;">关联的部署配置</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">允许层级</div>
+                            <div class="detail-value">${(deployConfig.allowed_tiers || []).join(', ')}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">资源需求</div>
+                            <div class="detail-value"><code>${JSON.stringify(deployConfig.resources || {}, null, 2)}</code></div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">副本数</div>
+                            <div class="detail-value">${deployConfig.replicas}</div>
+                        </div>
+                    ` : ''}
+                `;
+                openModal('stage-detail-modal');
+            } catch (e) {
+                showToast('获取详情失败: ' + e.message, 'error');
+            }
+        }
+
+        // ============= 应用管理模块 =============
+        let allStagesList = [];
+        
+        async function loadApps() {
+            try {
+                // 先加载阶段列表，供添加应用时使用
+                const stagesData = await apiCall('/stages', 'GET');
+                allStagesList = Object.keys(stagesData);
+                
+                const data = await apiCall('/applications', 'GET');
+                const tbody = document.getElementById('apps-table-body');
+                tbody.innerHTML = '';
+                for (const [appId, app] of Object.entries(data)) {
+                    const row = tbody.insertRow();
+                    row.insertCell().textContent = app.name || '-';
+                    row.insertCell().textContent = app.description || '-';
+                    row.insertCell().textContent = app.input_type || '-';
+                    row.insertCell().textContent = app.entry_stage || '-';
+                    
+                    const actions = row.insertCell();
+                    const detailBtn = document.createElement('button');
+                    detailBtn.className = 'btn btn-info';
+                    detailBtn.textContent = '详情';
+                    detailBtn.onclick = () => showAppDetail(appId);
+                    actions.appendChild(detailBtn);
+                }
+            } catch (e) {
+                console.error(e);
+                showToast('加载应用失败: ' + e.message, 'error');
+            }
+        }
+        
+        async function openAppModal() {
+            // 清空表单
+            document.getElementById('app-name').value = '';
+            document.getElementById('app-input-type').value = '';
+            document.getElementById('app-desc').value = '';
+            document.getElementById('app-stages').value = '[]';
+            document.getElementById('app-edges').value = '[]';
+            document.getElementById('app-exit-stages').value = '[]';
+            
+            // 加载阶段选项
+            const entrySelect = document.getElementById('app-entry-stage');
+            entrySelect.innerHTML = '<option value="">请选择阶段</option>';
+            
+            try {
+                const stagesData = await apiCall('/stages', 'GET');
+                allStagesList = Object.keys(stagesData);
+                for (const stageName of allStagesList) {
+                    const opt = document.createElement('option');
+                    opt.value = stageName;
+                    opt.textContent = stageName;
+                    entrySelect.appendChild(opt);
+                }
+            } catch (e) {
+                console.error(e);
+            }
+            
+            openModal('app-modal');
+        }
+        
+        async function createApp() {
+            const name = document.getElementById('app-name').value.trim();
+            const input_type = document.getElementById('app-input-type').value.trim();
+            const entry_stage = document.getElementById('app-entry-stage').value.trim();
+            
+            if (!name || !input_type || !entry_stage) {
+                showToast('请填写必填字段', 'error');
+                return;
+            }
+            
+            let stages, edges, exit_stages;
+            try {
+                stages = JSON.parse(document.getElementById('app-stages').value || '[]');
+            } catch (e) {
+                showToast('阶段列表JSON格式无效', 'error');
+                return;
+            }
+            try {
+                edges = JSON.parse(document.getElementById('app-edges').value || '[]');
+            } catch (e) {
+                showToast('边列表JSON格式无效', 'error');
+                return;
+            }
+            try {
+                exit_stages = JSON.parse(document.getElementById('app-exit-stages').value || '[]');
+            } catch (e) {
+                showToast('出口阶段JSON格式无效', 'error');
+                return;
+            }
+            
+            const body = {
+                name,
+                input_type,
+                description: document.getElementById('app-desc').value,
+                stages,
+                edges,
+                entry_stage,
+                exit_stages
+            };
+            
+            try {
+                await apiCall('/applications', 'POST', body);
+                showToast('应用创建成功');
+                closeModal('app-modal');
+                loadApps();
+            } catch (e) {
+                showToast('创建应用失败: ' + e.message, 'error');
+            }
+        }
+        
+        async function showAppDetail(appId) {
+            try {
+                const data = await apiCall('/applications', 'GET');
+                const app = data[appId];
+                if (!app) {
+                    showToast('应用不存在', 'error');
+                    return;
+                }
+                
+                const content = document.getElementById('app-detail-content');
+                content.innerHTML = `
+                    <div class="detail-item">
+                        <div class="detail-label">应用名称</div>
+                        <div class="detail-value">${app.name || '-'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">应用ID</div>
+                        <div class="detail-value">${appId}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">描述</div>
+                        <div class="detail-value">${app.description || '-'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">输入类型</div>
+                        <div class="detail-value">${app.input_type || '-'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">入口阶段</div>
+                        <div class="detail-value">${app.entry_stage || '-'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">出口阶段</div>
+                        <div class="detail-value"><code>${JSON.stringify(app.exit_stages || [])}</code></div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">阶段列表</div>
+                        <div class="detail-value"><code>${JSON.stringify(app.stages || [])}</code></div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">边列表</div>
+                        <div class="detail-value"><code>${JSON.stringify(app.edges || [])}</code></div>
+                    </div>
+                `;
+                openModal('app-detail-modal');
+            } catch (e) {
+                showToast('获取详情失败: ' + e.message, 'error');
+            }
+        }
+
+        // ============= 部署配置模块 =============
+        async function loadDeployments() {
+            try {
+                const data = await apiCall('/deployments', 'GET');
+                const tbody = document.getElementById('deploy-table-body');
+                tbody.innerHTML = '';
+                for (const [stageName, deploy] of Object.entries(data)) {
+                    const row = tbody.insertRow();
+                    row.insertCell().textContent = stageName;
+                    row.insertCell().textContent = deploy.description || '-';
+                    row.insertCell().textContent = (deploy.allowed_tiers || []).join(', ');
+                    row.insertCell().textContent = deploy.replicas || 1;
+                    
+                    const actions = row.insertCell();
+                    const detailBtn = document.createElement('button');
+                    detailBtn.className = 'btn btn-info';
+                    detailBtn.textContent = '详情';
+                    detailBtn.onclick = () => showDeployDetail(stageName);
+                    actions.appendChild(detailBtn);
+                }
+            } catch (e) {
+                console.error(e);
+                showToast('加载部署配置失败: ' + e.message, 'error');
+            }
+        }
+        
+        async function openDeployModal() {
+            // 清空表单
+            document.getElementById('deploy-stage-name').innerHTML = '<option value="">请选择阶段</option>';
+            document.getElementById('deploy-desc').value = '';
+            document.getElementById('deploy-allowed-tiers').value = '["end", "edge", "cloud"]';
+            document.getElementById('deploy-resources').value = '{"cpu_cores": 0.5, "memory_mb": 256, "gpu_count": 0}';
+            document.getElementById('deploy-replicas').value = '1';
+            document.getElementById('deploy-node-affinity').value = '{}';
+            document.getElementById('deploy-proximity').value = '{}';
+            
+            // 加载阶段选项
+            try {
+                const stagesData = await apiCall('/stages', 'GET');
+                const stageSelect = document.getElementById('deploy-stage-name');
+                for (const stageName of Object.keys(stagesData)) {
+                    const opt = document.createElement('option');
+                    opt.value = stageName;
+                    opt.textContent = stageName;
+                    stageSelect.appendChild(opt);
+                }
+            } catch (e) {
+                console.error(e);
+            }
+            
+            openModal('deploy-modal');
+        }
+        
+        async function createDeployment() {
+            const stage_name = document.getElementById('deploy-stage-name').value.trim();
+            
+            if (!stage_name) {
+                showToast('请选择阶段', 'error');
+                return;
+            }
+            
+            let allowed_tiers, resources, node_affinity, proximity;
+            try {
+                allowed_tiers = JSON.parse(document.getElementById('deploy-allowed-tiers').value || '["end", "edge", "cloud"]');
+            } catch (e) {
+                showToast('允许层级JSON格式无效', 'error');
+                return;
+            }
+            try {
+                resources = JSON.parse(document.getElementById('deploy-resources').value || '{"cpu_cores": 0.5, "memory_mb": 256, "gpu_count": 0}');
+            } catch (e) {
+                showToast('资源需求JSON格式无效', 'error');
+                return;
+            }
+            try {
+                node_affinity = JSON.parse(document.getElementById('deploy-node-affinity').value || '{}');
+            } catch (e) {
+                showToast('节点亲和JSON格式无效', 'error');
+                return;
+            }
+            try {
+                proximity = JSON.parse(document.getElementById('deploy-proximity').value || '{}');
+            } catch (e) {
+                showToast('邻近部署JSON格式无效', 'error');
+                return;
+            }
+            
+            const body = {
+                stage_name,
+                description: document.getElementById('deploy-desc').value,
+                allowed_tiers,
+                resources,
+                replicas: parseInt(document.getElementById('deploy-replicas').value) || 1,
+                node_affinity,
+                proximity
+            };
+            
+            try {
+                await apiCall('/deployments', 'POST', body);
+                showToast('部署配置创建成功');
+                closeModal('deploy-modal');
+                loadDeployments();
+            } catch (e) {
+                showToast('创建部署配置失败: ' + e.message, 'error');
+            }
+        }
+        
+        async function showDeployDetail(stageName) {
+            try {
+                const data = await apiCall('/deployments', 'GET');
+                const deploy = data[stageName];
+                if (!deploy) {
+                    showToast('部署配置不存在', 'error');
+                    return;
+                }
+                
+                const content = document.getElementById('deploy-detail-content');
+                content.innerHTML = `
+                    <div class="detail-item">
+                        <div class="detail-label">阶段名称</div>
+                        <div class="detail-value">${stageName}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">描述</div>
+                        <div class="detail-value">${deploy.description || '-'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">允许层级</div>
+                        <div class="detail-value">${(deploy.allowed_tiers || []).join(', ')}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">资源需求</div>
+                        <div class="detail-value"><code>${JSON.stringify(deploy.resources || {}, null, 2)}</code></div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">副本数</div>
+                        <div class="detail-value">${deploy.replicas}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">节点亲和</div>
+                        <div class="detail-value"><code>${JSON.stringify(deploy.node_affinity || {}, null, 2)}</code></div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">邻近部署</div>
+                        <div class="detail-value"><code>${JSON.stringify(deploy.proximity || {}, null, 2)}</code></div>
+                    </div>
+                `;
+                openModal('deploy-detail-modal');
+            } catch (e) {
+                showToast('获取详情失败: ' + e.message, 'error');
+            }
+        }
+
+        // ============= 策略管理模块 =============
+        async function loadStrategies() {
+            try {
+                const data = await apiCall('/strategies', 'GET');
+                const tbody = document.getElementById('strategies-table-body');
+                tbody.innerHTML = '';
+                for (const [name, strategy] of Object.entries(data)) {
+                    const row = tbody.insertRow();
+                    row.insertCell().textContent = name;
+                    row.insertCell().textContent = strategy.strategy_type || '-';
+                    row.insertCell().textContent = strategy.description || '-';
+                    
+                    const actions = row.insertCell();
+                    const detailBtn = document.createElement('button');
+                    detailBtn.className = 'btn btn-info';
+                    detailBtn.textContent = '详情';
+                    detailBtn.onclick = () => showStrategyDetail(name);
+                    actions.appendChild(detailBtn);
+                }
+            } catch (e) {
+                console.error(e);
+                showToast('加载策略失败: ' + e.message, 'error');
+            }
+        }
+        
+        function openStrategyModal() {
+            // 清空表单
+            document.getElementById('strategy-name').value = '';
+            document.getElementById('strategy-type').value = 'path';
+            document.getElementById('strategy-handler').value = '';
+            document.getElementById('strategy-desc').value = '';
+            document.getElementById('strategy-params').value = '{}';
+            openModal('strategy-modal');
+        }
+        
+        async function createStrategy() {
+            const name = document.getElementById('strategy-name').value.trim();
+            const strategy_type = document.getElementById('strategy-type').value.trim();
+            const handler = document.getElementById('strategy-handler').value.trim();
+            
+            if (!name || !strategy_type || !handler) {
+                showToast('请填写必填字段', 'error');
+                return;
+            }
+            
+            let params = {};
+            try {
+                params = JSON.parse(document.getElementById('strategy-params').value || '{}');
+            } catch (e) {
+                showToast('策略参数JSON格式无效', 'error');
+                return;
+            }
+            
+            const body = {
+                name,
+                strategy_type,
+                handler,
+                description: document.getElementById('strategy-desc').value,
+                params
+            };
+            
+            try {
+                await apiCall('/strategies', 'POST', body);
+                showToast('策略创建成功');
+                closeModal('strategy-modal');
+                loadStrategies();
+            } catch (e) {
+                showToast('创建策略失败: ' + e.message, 'error');
+            }
+        }
+        
+        async function showStrategyDetail(name) {
+            try {
+                const data = await apiCall('/strategies', 'GET');
+                const strategy = data[name];
+                if (!strategy) {
+                    showToast('策略不存在', 'error');
+                    return;
+                }
+                
+                const content = document.getElementById('strategy-detail-content');
+                content.innerHTML = `
+                    <div class="detail-item">
+                        <div class="detail-label">策略名称</div>
+                        <div class="detail-value">${name}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">策略类型</div>
+                        <div class="detail-value">${strategy.strategy_type || '-'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Handler</div>
+                        <div class="detail-value"><code>${strategy.handler}</code></div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">描述</div>
+                        <div class="detail-value">${strategy.description || '-'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">策略参数</div>
+                        <div class="detail-value"><code>${JSON.stringify(strategy.params || {}, null, 2)}</code></div>
+                    </div>
+                `;
+                openModal('strategy-detail-modal');
+            } catch (e) {
+                showToast('获取详情失败: ' + e.message, 'error');
+            }
+        }
+
+        // ============= 任务提交模块 =============
+        let currentTaskId = null;
+        
+        async function loadSubmitOptions() {
+            try {
+                // 加载应用选项
+                const appsData = await apiCall('/applications', 'GET');
+                const appSelect = document.getElementById('submit-app');
+                appSelect.innerHTML = '<option value="">请选择应用</option>';
+                for (const [appName, app] of Object.entries(appsData)) {
+                    const opt = document.createElement('option');
+                    opt.value = appName;
+                    opt.textContent = app.name || appName;
+                    appSelect.appendChild(opt);
+                }
+                
+                // 加载策略选项
+                const strategiesData = await apiCall('/strategies', 'GET');
+                const strategySelect = document.getElementById('submit-strategy');
+                strategySelect.innerHTML = '<option value="">请选择策略</option>';
+                for (const name of Object.keys(strategiesData)) {
+                    const opt = document.createElement('option');
+                    opt.value = name;
+                    opt.textContent = name;
+                    strategySelect.appendChild(opt);
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+        
+        async function submitTask() {
+            const appName = document.getElementById('submit-app').value.trim();
+            const strategyName = document.getElementById('submit-strategy').value.trim();
+            const fileInput = document.getElementById('submit-file');
+            
+            if (!appName || !strategyName) {
+                showToast('请选择应用和策略', 'error');
+                return;
+            }
+            
+            // 处理文件上传和任务提交
+            try {
+                let fileId = null;
+                
+                // 如果有文件，先上传
+                if (fileInput.files && fileInput.files[0]) {
+                    const formData = new FormData();
+                    formData.append('file', fileInput.files[0]);
+                    const uploadResponse = await fetch('/api/v1/files/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    if (!uploadResponse.ok) throw new Error('文件上传失败');
+                    const uploadResult = await uploadResponse.json();
+                    fileId = uploadResult.file_id;
+                }
+                
+                // 提交任务
+                const body = {
+                    application_name: appName,
+                    strategy_name: strategyName,
+                    input_data: fileId ? { file_id: fileId } : {}
+                };
+                
+                const taskData = await apiCall('/tasks', 'POST', body);
+                currentTaskId = taskData.task_id;
+                
+                showToast('任务提交成功');
+                
+                // 更新状态显示
+                const statusArea = document.getElementById('task-status-area');
+                statusArea.innerHTML = `<div><strong>任务ID:</strong> ${currentTaskId}</div><div><strong>状态:</strong> <span class="badge badge-warning">运行中</span></div>`;
+                document.getElementById('task-result-area').innerHTML = '等待结果...';
+                
+                // 开始轮询任务状态
+                pollTaskStatus(currentTaskId);
+            } catch (e) {
+                showToast('任务提交失败: ' + e.message, 'error');
+            }
+        }
+        
+        async function pollTaskStatus(taskId) {
+            const pollInterval = setInterval(async () => {
+                try {
+                    const data = await apiCall(`/tasks/${taskId}`, 'GET');
+                    const statusArea = document.getElementById('task-status-area');
+                    
+                    if (data.status === 'completed') {
+                        clearInterval(pollInterval);
+                        statusArea.innerHTML = `
+                            <div><strong>任务ID:</strong> ${taskId}</div>
+                            <div><strong>状态:</strong> <span class="badge badge-success">已完成</span></div>
+                        `;
+                        document.getElementById('task-result-area').innerHTML = `
+                            <div class="detail-item">
+                                <div class="detail-label">结果</div>
+                                <div class="detail-value"><code>${JSON.stringify(data.final_output || {}, null, 2)}</code></div>
+                            </div>
+                        `;
+                    } else if (data.status === 'failed') {
+                        clearInterval(pollInterval);
+                        statusArea.innerHTML = `
+                            <div><strong>任务ID:</strong> ${taskId}</div>
+                            <div><strong>状态:</strong> <span class="badge badge-error">失败</span></div>
+                        `;
+                        document.getElementById('task-result-area').innerHTML = `
+                            <div class="detail-item">
+                                <div class="detail-label">错误</div>
+                                <div class="detail-value">${data.final_output || '未知错误'}</div>
+                            </div>
+                        `;
+                    }
+                } catch (e) {
+                    console.error(e);
+                }
+            }, 2000);
+        }
+
+        // ============= 任务记录模块 =============
+        async function loadRecords() {
+            try {
+                const data = await apiCall('/tasks', 'GET');
+                const tbody = document.getElementById('records-table-body');
+                tbody.innerHTML = '';
+                
+                const tasks = Array.isArray(data) ? data : Object.values(data);
+                
+                for (const task of tasks) {
+                    const row = tbody.insertRow();
+                    row.insertCell().textContent = task.task_id || '-';
+                    row.insertCell().textContent = task.application_name || '-';
+                    row.insertCell().textContent = task.strategy_name || '-';
+                    
+                    const statusCell = row.insertCell();
+                    const statusBadge = document.createElement('span');
+                    statusBadge.className = `badge ${task.status === 'completed' ? 'badge-success' : task.status === 'failed' ? 'badge-error' : 'badge-warning'}`;
+                    statusBadge.textContent = task.status || 'pending';
+                    statusCell.appendChild(statusBadge);
+                    
+                    row.insertCell().textContent = formatBeijingTime(task.created_at);
+                    
+                    const actions = row.insertCell();
+                    const detailBtn = document.createElement('button');
+                    detailBtn.className = 'btn btn-info';
+                    detailBtn.textContent = '查看';
+                    detailBtn.onclick = () => {
+                        document.getElementById('trace-task-id').value = task.task_id;
+                        loadTrace();
+                        document.querySelector('.nav-item[data-module="trace"]').click();
+                    };
+                    actions.appendChild(detailBtn);
+                }
+            } catch (e) {
+                console.error(e);
+                showToast('加载任务记录失败: ' + e.message, 'error');
+            }
+        }
+
+        // ============= 任务追踪模块 =============
+        async function loadTrace() {
+            const taskId = document.getElementById('trace-task-id').value.trim();
+            if (!taskId) {
+                showToast('请输入任务ID', 'error');
+                return;
+            }
+            
+            try {
+                // 获取任务基本信息
+                const data = await apiCall(`/tasks/${taskId}`, 'GET');
+                // 获取执行轨迹
+                let traceData = null;
+                try {
+                    traceData = await apiCall(`/results/${taskId}/trace`, 'GET');
+                } catch (e) {
+                    console.log('No trace data available');
+                }
+                
+                const traceContent = document.getElementById('trace-content');
+                
+                let traceHtml = `
+                    <div class="card" style="margin-top: 16px;">
+                        <div class="detail-item">
+                            <div class="detail-label">任务ID</div>
+                            <div class="detail-value">${taskId}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">应用</div>
+                            <div class="detail-value">${data.application_name || '-'}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">策略</div>
+                            <div class="detail-value">${data.strategy_name || '-'}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">状态</div>
+                            <div class="detail-value"><span class="badge ${data.status === 'completed' ? 'badge-success' : data.status === 'failed' ? 'badge-error' : 'badge-warning'}">${data.status || 'pending'}</span></div>
+                        </div>
+                `;
+                
+                if (traceData && traceData.execution_path) {
+                    traceHtml += `
+                        <div class="detail-item" style="margin-top: 12px; padding-top:12px; border-top: 2px solid #f1f5f9;">
+                            <div class="detail-label" style="font-size:14px; color:#334155;">执行路径</div>
+                        </div>
+                    `;
+                    
+                    for (const step of traceData.execution_path) {
+                        traceHtml += `
+                            <div class="detail-item">
+                                <div class="detail-label">步骤 ${step.step_index}</div>
+                                <div class="detail-value">
+                                    <div>阶段: ${step.stage_name || '-'}</div>
+                                    <div>节点: ${step.node_id || '-'}</div>
+                                    <div>执行时间: ${step.execution_time_ms ? step.execution_time_ms + 'ms' : '-'}</div>
+                                    ${step.error_msg ? `<div style="color:#ef4444;">错误: ${step.error_msg}</div>` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }
+                }
+                
+                if (data.final_output) {
+                    traceHtml += `
+                        <div class="detail-item" style="margin-top: 12px; padding-top:12px; border-top: 2px solid #f1f5f9;">
+                            <div class="detail-label" style="font-size:14px; color:#334155;">最终结果</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-value"><code>${JSON.stringify(data.final_output, null, 2)}</code></div>
+                        </div>
+                    `;
+                }
+                
+                traceHtml += '</div>';
+                traceContent.innerHTML = traceHtml;
+            } catch (e) {
+                showToast('加载追踪信息失败: ' + e.message, 'error');
+            }
+        }
+
+        // 初始加载
+        loadStages();
+    </script>
 </body>
 </html>

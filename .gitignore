@@ -212,3 +212,6 @@ prometheus/*
 kuberay/*
 
 uploads/
+require/
+test/
+AGENTS.md

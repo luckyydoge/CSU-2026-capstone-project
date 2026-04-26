@@ -2,24 +2,33 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime
 from models.task import TaskStatus
 from models.trace import ExecutionTrace, StepRecord
-from storage.memory_store import APPLICATION_DB, STAGE_DB
 from orchestrator.strategy_loader import load_strategy
 from config import CONFIG
 import ray
 import time
 
+def get_db():
+    """获取数据库Session"""
+    from app.database import SessionLocal
+    return SessionLocal()
+
 def get_stage_function(stage_name: str):
     """动态加载阶段函数"""
     import os
     import importlib.util
+    
+    db = get_db()
+    try:
+        from app.models import Stage
+        stage_info = db.query(Stage).filter(Stage.name == stage_name).first()
+        if not stage_info:
+            raise ValueError(f"Stage '{stage_name}' not found in database")
 
-    stage_info = STAGE_DB.get(stage_name)
-    if not stage_info:
-        raise ValueError(f"Stage '{stage_name}' not found in database")
+        handler = stage_info.handler
+    finally:
+        db.close()
 
-    handler = stage_info.get("handler", f"{stage_name}:run")
     module_name, func_name = handler.split(":")
-
     module_path = os.path.join(CONFIG.STAGED_CODE_DIR, f"{module_name}.py")
 
     if not os.path.exists(module_path):
@@ -50,11 +59,21 @@ class RayExecutor:
     @staticmethod
     def _get_deployment_config(stage_name: str) -> Dict:
         """获取阶段的部署配置"""
-        from storage.memory_store import DEPLOYMENT_DB
-        return DEPLOYMENT_DB.get(stage_name, {
-            "allowed_tiers": ["edge"],
-            "resources": {"cpu_cores": 0.5, "memory_mb": 128}
-        })
+        db = get_db()
+        try:
+            from app.models import DeploymentConfig
+            config = db.query(DeploymentConfig).filter(DeploymentConfig.stage_name == stage_name).first()
+            if not config:
+                return {
+                    "allowed_tiers": ["edge"],
+                    "resources": {"cpu_cores": 0.5, "memory_mb": 128}
+                }
+            return {
+                "allowed_tiers": config.allowed_tiers,
+                "resources": config.resources
+            }
+        finally:
+            db.close()
 
     @staticmethod
     def _get_tier_resource_name(tier: str) -> str:
@@ -81,8 +100,9 @@ class RayExecutor:
         allowed_tiers = deploy_config.get("allowed_tiers", ["end", "edge", "cloud"])
         if not RayExecutor._validate_tier(target_tier, allowed_tiers):
             if allowed_tiers:
-                target_tier = allowed_tiers[0]
-                print(f"⚠️ 指定层级 '{target_tier}' 不在允许列表中，使用默认层级 '{target_tier}'")
+                fallback_tier = allowed_tiers[0]
+                print(f"⚠️ 请求层级 '{target_tier}' 不在允许列表中，使用默认层级 '{fallback_tier}'")
+                target_tier = fallback_tier
             else:
                 target_tier = "edge"
 
@@ -107,7 +127,7 @@ class RayExecutor:
             ray_options["memory"] = memory_mb * 1024 * 1024
 
         raw_stage_func = get_stage_function(stage_name)
-        wrapped_func = RayExecutor._wrap_stage_func(raw_stage_func)
+        wrapped_func = RayExecutor._wrap_stage_func(raw_stage_func, target_tier)
         remote_func = ray.remote(wrapped_func).options(**ray_options)
 
         start = datetime.utcnow()
@@ -142,7 +162,7 @@ class RayExecutor:
             }
 
     @staticmethod
-    def _wrap_stage_func(stage_func):
+    def _wrap_stage_func(stage_func, expected_tier: str = "unknown"):
         """包装阶段函数，添加节点信息"""
         def wrapper(input_data):
             import socket
@@ -155,20 +175,10 @@ class RayExecutor:
 
             hostname = socket.gethostname()
 
-            tier = "unknown"
-            try:
-                for tier_name, resource_name in [("end", "tier_end"), ("edge", "tier_edge"), ("cloud", "tier_cloud")]:
-                    available = ray.available_resources().get(resource_name, 0)
-                    if available > 0:
-                        tier = tier_name
-                        break
-            except:
-                pass
-
             node_info = {
                 "hostname": hostname,
                 "node_id": str(node_id),
-                "tier": tier
+                "tier": expected_tier
             }
 
             result = stage_func(input_data)
@@ -183,30 +193,80 @@ class RayExecutor:
     def _prepare_stage_input(current_input: Any, current_stage: str) -> Any:
         """准备阶段的输入数据"""
         stage_input = current_input
+        print(f"[_prepare_stage_input] 原始输入: type={type(current_input)}, value={repr(current_input)}")
+
+        if isinstance(current_input, str):
+            print(f"[_prepare_stage_input] 裸字符串输入，转为 {{'file_id': ...}}")
+            current_input = {"file_id": current_input}
+            stage_input = current_input
+
         if isinstance(current_input, dict) and "file_id" in current_input:
-            from service.file_service import FileService
-            file_id = current_input["file_id"]
-            file_content = FileService.get_file_content(file_id)
-            if file_content:
-                stage_input = {
-                    "file_content": file_content,
-                    "file_id": file_id,
-                    "metadata": current_input.get("metadata", {})
-                }
-                print(f"[文件加载] file_id={file_id}, size={len(file_content)} bytes")
-            else:
-                print(f"[警告] 文件不存在: file_id={file_id}")
+            print(f"[_prepare_stage_input] 检测到 file_id!")
+            try:
+                from service.file_service import FileService
+                file_id = current_input["file_id"]
+                
+                # 先检查 file_info
+                print(f"[_prepare_stage_input] 准备调用 FileService.get_file({file_id})")
+                file_info = FileService.get_file(file_id)
+                print(f"[_prepare_stage_input] file_info: {file_info}")
+                
+                file_content = FileService.get_file_content(file_id)
+                print(f"[_prepare_stage_input] file_content: type={type(file_content)}, len={len(file_content) if file_content else 0}")
+                
+                if file_content:
+                    stage_input = {
+                        "file_content": file_content,
+                        "file_id": file_id,
+                        "metadata": current_input.get("metadata", {})
+                    }
+                    print(f"[_prepare_stage_input] ✅ 文件加载成功! file_id={file_id}, size={len(file_content)} bytes")
+                else:
+                    print(f"[_prepare_stage_input] ❌ 文件内容为空! file_id={file_id}")
+            except Exception as e:
+                import traceback
+                print(f"[_prepare_stage_input] ❌ 发生异常! {type(e)}: {e}")
+                print(f"[_prepare_stage_input] 异常堆栈:\n{traceback.format_exc()}")
+        else:
+            print(f"[_prepare_stage_input] 不是 dict 或没有 file_id")
+            
         return stage_input
 
     @staticmethod
+    def _get_app_dict(app_name: str) -> Dict:
+        """从数据库获取应用配置"""
+        db = get_db()
+        try:
+            from app.models import Application, ApplicationStage, ApplicationEdge, ApplicationEntry, ApplicationExit
+            
+            app = db.query(Application).filter(Application.name == app_name).first()
+            if not app:
+                raise ValueError(f"Application '{app_name}' not found")
+            
+            stages = db.query(ApplicationStage).filter(ApplicationStage.app_id == app.app_id).order_by(ApplicationStage.order_index).all()
+            edges = db.query(ApplicationEdge).filter(ApplicationEdge.app_id == app.app_id).all()
+            entries = db.query(ApplicationEntry).filter(ApplicationEntry.app_id == app.app_id).all()
+            exits = db.query(ApplicationExit).filter(ApplicationExit.app_id == app.app_id).all()
+            
+            return {
+                "app_id": app.app_id,
+                "name": app.name,
+                "description": app.description,
+                "input_type": app.input_type,
+                "stages": [s.stage_name for s in stages],
+                "edges": [
+                    {"from_stage": e.from_stage, "to_stage": e.to_stage}
+                    for e in edges
+                ],
+                "entry_stage": entries[0].stage_name if entries else None,
+                "exit_stages": [e.stage_name for e in exits]
+            }
+        finally:
+            db.close()
+    
+    @staticmethod
     def execute(task_id: str, app_name: str, strategy_name: str, input_data: Any) -> Dict:
-        app_dict = None
-        for app in APPLICATION_DB.values():
-            if app.get("name") == app_name:
-                app_dict = app
-                break
-        if not app_dict:
-            raise ValueError(f"Application '{app_name}' not found")
+        app_dict = RayExecutor._get_app_dict(app_name)
 
         strategy_func = load_strategy(strategy_name)
 
@@ -305,5 +365,5 @@ class RayExecutor:
         return {
             "final_output": final_output,
             "trace": trace.dict(),
-            "status": TaskStatus.COMPLETED
+            "status": TaskStatus.COMPLETED.value
         }

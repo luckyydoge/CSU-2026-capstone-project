@@ -42,8 +42,7 @@ else:
 print("=" * 60)
 
 from api.routes import router as api_router
-from routers import monitor
-from storage.memory_store import APPLICATION_DB, STAGE_DB, DEPLOYMENT_DB, STRATEGY_DB, TASK_DB, TRACE_DB
+from routers import monitor, db_api
 
 app = FastAPI(title="协同推理平台 - 端边云协同系统")
 
@@ -72,6 +71,7 @@ def read_index():
 
 app.include_router(api_router)
 app.include_router(monitor.router)
+app.include_router(db_api.router)
 
 @app.on_event("startup")
 async def startup_event():
