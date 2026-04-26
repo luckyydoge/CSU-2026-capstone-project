@@ -1,20 +1,22 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Stage, Strategy, DeploymentConfig, Application, Task, ExecutionTrace
+from app.models import Stage, Strategy, DeploymentConfig, Application, Task, ExecutionTrace, Service
 from app.schemas import (
     StageCreate, StageRead,
     StrategyCreate, StrategyRead,
     DeploymentConfigCreate, DeploymentConfigRead,
     ApplicationCreate, ApplicationRead,
     TaskCreate, TaskRead,
-    ExecutionTraceRead
+    ExecutionTraceRead,
+    ServiceCreate, ServiceRead, ServiceUpdate,
 )
 from service.stage_service import StageService
 from service.strategy_service import StrategyService
 from service.deployment_service import DeploymentService
 from service.application_service import ApplicationService
 from service.task_service import TaskService
+from service.service_service import ServiceService
 from orchestrator.ray_executor import RayExecutor
 from models.task import TaskStatus
 
@@ -213,3 +215,43 @@ def execute_db_task(task_id: str):
             
     finally:
         db.close()
+
+
+@router.post("/services", response_model=ServiceRead, status_code=201)
+def create_service(req: ServiceCreate, db: Session = Depends(get_db)):
+    try:
+        ServiceService._create_service_db(db, req)
+        return ServiceService._get_service_by_name_db(db, req.name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/services", response_model=list[ServiceRead])
+def list_services(db: Session = Depends(get_db)):
+    return ServiceService._list_services_db(db)
+
+
+@router.get("/services/{service_id}", response_model=ServiceRead)
+def get_service(service_id: int, db: Session = Depends(get_db)):
+    service = ServiceService._get_service_db(db, service_id)
+    if not service:
+        raise HTTPException(status_code=404, detail="Service not found")
+    return service
+
+
+@router.put("/services/{service_id}", response_model=ServiceRead)
+def update_service(service_id: int, req: ServiceUpdate, db: Session = Depends(get_db)):
+    try:
+        service = ServiceService._update_service_db(db, service_id, req)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not service:
+        raise HTTPException(status_code=404, detail="Service not found")
+    return service
+
+
+@router.delete("/services/{service_id}", status_code=204)
+def delete_service(service_id: int, db: Session = Depends(get_db)):
+    deleted = ServiceService._delete_service_db(db, service_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Service not found")

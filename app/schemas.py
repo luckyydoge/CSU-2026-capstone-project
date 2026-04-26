@@ -175,3 +175,40 @@ class ExecutionTraceRead(BaseModel):
     error_msg: Optional[str]
 
     model_config = {"from_attributes": True}
+
+
+class ServiceCreate(BaseModel):
+    name: str
+    prefix: Optional[str] = None
+    file_path: Optional[str] = None
+    num_cpus: float = 0.5
+    num_memory: int = 128
+    max_replicas: int = 10
+    min_replicas: int = 1
+    description: Optional[str] = None
+
+
+class ServiceRead(BaseModel):
+    id: int
+    name: str
+    prefix: Optional[str] = None
+    file_path: Optional[str] = None
+    num_cpus: float
+    num_memory: int
+    max_replicas: int
+    min_replicas: int
+    description: Optional[str] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ServiceUpdate(BaseModel):
+    name: Optional[str] = None
+    prefix: Optional[str] = None
+    file_path: Optional[str] = None
+    num_cpus: Optional[float] = None
+    num_memory: Optional[int] = None
+    max_replicas: Optional[int] = None
+    min_replicas: Optional[int] = None
+    description: Optional[str] = None

@@ -64,6 +64,7 @@ print("=" * 60)
 from api.routes import router as api_router
 from routers import monitor, db_api
 from monitor.controller import init_controller, get_controller
+from monitor.scheduler import SchedulerController
 
 app = FastAPI(title="协同推理平台 - 端边云协同系统")
 app.include_router(monitor_router)
@@ -101,12 +102,18 @@ app.include_router(db_api.router)
 async def startup_event():
     Base.metadata.create_all(bind=engine)
     init_controller("configs/controller.yaml")
+    scheduler = SchedulerController("configs/scheduler.yaml")
+    scheduler.start()
+    app.state.scheduler = scheduler
+    print("🚀 调度器已启动")
     print("🚀 服务启动完成")
     print(f"📊 Ray 集群信息: {ray.cluster_resources()}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     print("🛑 关闭服务...")
+    if hasattr(app.state, "scheduler"):
+        app.state.scheduler.stop()
     ctrl = get_controller()
     if ctrl:
         ctrl.stop()

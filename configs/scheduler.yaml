@@ -1,0 +1,24 @@
+prometheus_url: "http://127.0.0.1:8428"
+scrape_interval: 10
+namespace: "default"
+
+stages:
+  - stage_id: "load_test"
+    cluster: "raycluster-kuberay"
+    worker_group: "workergroup"
+    window: "1m"
+    peak_qps_window: "5m"
+    min_replicas: 1
+    max_replicas: 20
+
+capacity:
+  cpu_per_replica: 1.0
+  mem_mb_per_replica: 1024
+  buffer_ratio: 0.2
+  min_buffer: 1
+
+suppressor:
+  scale_up_cooldown: 30
+  scale_down_cooldown: 60
+  max_scale_up_per_cycle: 3
+  max_scale_down_per_cycle: 1

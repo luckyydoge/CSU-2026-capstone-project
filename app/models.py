@@ -180,3 +180,18 @@ class File(Base):
     size_bytes = Column(Integer, nullable=False)
     file_path = Column(String(500), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
+
+
+class Service(Base):
+    __tablename__ = "services"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(255), unique=True, nullable=False)
+    prefix = Column(String(255))
+    file_path = Column(String(500))
+    num_cpus = Column(Float, default=0.5)
+    num_memory = Column(Integer, default=128)
+    max_replicas = Column(Integer, default=10)
+    min_replicas = Column(Integer, default=1)
+    description = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
