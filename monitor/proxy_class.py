@@ -1,5 +1,5 @@
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Callable, Any, Optional, List
 import uuid
@@ -7,6 +7,7 @@ import psutil
 import os
 import threading
 from ray.util.metrics import Gauge, Histogram
+from monitor.vm_writer import push_metric, get_worker_group
 
 _cpu_usage = Gauge('proxy_actor_cpu_usage', tag_keys=('node_id', 'stage_id'))
 _mem_usage = Gauge('proxy_actor_mem_usage', tag_keys=('node_id', 'stage_id'))
@@ -34,9 +35,14 @@ def monitor(stage_id: str = "", submit_time: str = "", **ray_kwargs: Any):
         if isinstance(target, type):
             origin_init = target.__init__
             def _monitor_loop(self):
+                wg = get_worker_group()
                 while not self._stop_event.is_set():
-                    _cpu_usage.set(self.process.cpu_percent(), tags={'node_id': self._node_id, 'stage_id': stage_id})
-                    _mem_usage.set(self.process.memory_info().rss / 1024 / 1024, tags={'node_id': self._node_id, 'stage_id': stage_id})
+                    cpu_val = self.process.cpu_percent()
+                    mem_val = self.process.memory_info().rss / 1024 / 1024
+                    _cpu_usage.set(cpu_val, tags={'node_id': self._node_id, 'stage_id': stage_id})
+                    _mem_usage.set(mem_val, tags={'node_id': self._node_id, 'stage_id': stage_id})
+                    push_metric("proxy_actor_cpu_usage", cpu_val, {'node_id': self._node_id, 'stage_id': stage_id, 'worker_group': wg})
+                    push_metric("proxy_actor_mem_usage", mem_val, {'node_id': self._node_id, 'stage_id': stage_id, 'worker_group': wg})
                     time.sleep(5)
             target._monitor_loop = _monitor_loop
 
@@ -81,32 +87,46 @@ def monitor(stage_id: str = "", submit_time: str = "", **ray_kwargs: Any):
             _stop_event = threading.Event()
             def _monitor_loop():
                 tags = {'node_id': node_id, 'stage_id': stage_id}
+                wg = get_worker_group()
                 while not _stop_event.is_set():
-                    _cpu_usage.set(process.cpu_percent(), tags=tags)
-                    _mem_usage.set(process.memory_info().rss / 1024 / 1024, tags=tags)
+                    cpu_val = process.cpu_percent()
+                    mem_val = process.memory_info().rss / 1024 / 1024
+                    _cpu_usage.set(cpu_val, tags=tags)
+                    _mem_usage.set(mem_val, tags=tags)
                     _actors.set(1, tags=tags)
+                    push_metric("proxy_actor_cpu_usage", cpu_val, {'node_id': node_id, 'stage_id': stage_id, 'worker_group': wg})
+                    push_metric("proxy_actor_mem_usage", mem_val, {'node_id': node_id, 'stage_id': stage_id, 'worker_group': wg})
+                    push_metric("proxy_actors", 1, {'node_id': node_id, 'stage_id': stage_id, 'worker_group': wg})
                     time.sleep(5)
 
             _monitor_thread = threading.Thread(target=_monitor_loop, daemon=True)
             _monitor_thread.start()
 
-            actual_start_time = datetime.utcnow()
+            tags_vm = {'node_id': node_id, 'stage_id': stage_id, 'worker_group': get_worker_group()}
+
+            start_ts = time.time()
+            start_dt = datetime.utcnow()
 
             if submit_time:
                 submit_dt = datetime.fromisoformat(submit_time)
-                queue_ms = (actual_start_time - submit_dt).total_seconds() * 1000
+                submit_ts = submit_dt.replace(tzinfo=timezone.utc).timestamp()
+                queue_ms = (start_ts - submit_ts) * 1000
                 _queue_latency.observe(queue_ms, tags={'node_id': node_id, 'stage_id': stage_id})
+                if queue_ms >= 0:
+                    push_metric("proxy_queue_time_ms", queue_ms, tags_vm)
 
             retval = target(*args, **kwargs)
-            actual_end_time = datetime.utcnow()
+            end_ts = time.time()
+            end_dt = datetime.utcnow()
             _stop_event.set()
 
-            latency_ms = (actual_end_time - actual_start_time).total_seconds() * 1000
+            latency_ms = (end_ts - start_ts) * 1000
             _stage_latency.observe(latency_ms, tags={'node_id': node_id, 'stage_id': stage_id})
+            push_metric("proxy_stage_latency_ms", latency_ms, tags_vm)
 
             if isinstance(retval, dict):
-                retval["_actual_start_time"] = actual_start_time.isoformat()
-                retval["_actual_end_time"] = actual_end_time.isoformat()
+                retval["_actual_start_time"] = start_dt.isoformat()
+                retval["_actual_end_time"] = end_dt.isoformat()
                 retval["_latency_ms"] = latency_ms
 
             return retval

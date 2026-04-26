@@ -3,9 +3,9 @@ import time
 import threading
 import logging
 import yaml
-from datetime import datetime
+import requests
+from datetime import datetime, timezone
 from typing import Optional
-from prometheus_api_client import PrometheusConnect
 from app.k8s_scaler import RayClusterScaler
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ class LatencyController:
         with open(config_path) as f:
             cfg = yaml.safe_load(f)
 
-        self.prom = PrometheusConnect(url=cfg["prometheus_url"], disable_ssl=True)
+        self.prom_url = cfg["prometheus_url"]
         self.interval = cfg["scrape_interval"]
         self.stages = cfg["stages"]
         self._stop = threading.Event()
@@ -49,21 +49,26 @@ class LatencyController:
         }
 
         queue_q = (
-            f'histogram_quantile({p}, '
-            f'sum by (le) (rate(ray_proxy_queue_time_ms_bucket{{stage_id="{sid}"}}[{w}])))'
+            f'sum(quantile_over_time({p}, '
+            f'proxy_queue_time_ms{{stage_id="{sid}"}}[{w}])) by (stage_id)'
         )
-        print(queue_q)
         lat_q = (
-            f'histogram_quantile({p}, '
-            f'sum by (le) (rate(ray_proxy_stage_latency_ms_bucket{{stage_id="{sid}"}}[{w}])))'
+            f'sum(quantile_over_time({p}, '
+            f'proxy_stage_latency_ms{{stage_id="{sid}"}}[{w}])) by (stage_id)'
         )
 
         for key, query in [("queue_time_ms", queue_q), ("latency_ms", lat_q)]:
             try:
-                resp = self.prom.custom_query(query)
-                print(resp)
-                if resp:
-                    val = float(resp[0]["value"][1])
+                http_resp = requests.get(
+                    f"{self.prom_url}/api/v1/query",
+                    params={"query": query},
+                    timeout=10,
+                )
+                http_resp.raise_for_status()
+                items = http_resp.json()["data"]["result"]
+                print(items)
+                if items:
+                    val = float(items[0]["value"][1])
                     result[key] = val if not math.isnan(val) else None
                 else:
                     result[key] = None
@@ -74,7 +79,7 @@ class LatencyController:
         return result
 
     def _run_once(self):
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         for sc in self.stages:
             self.latest[sc["stage_id"]] = self._query_pxx(sc)
         self.latest["_meta"] = {"last_updated": now}
