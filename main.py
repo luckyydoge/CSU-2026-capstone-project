@@ -26,18 +26,37 @@ import ray
 
 if CONFIG.RAY_ADDRESS:
     try:
-        ray.init(address=CONFIG.RAY_ADDRESS, ignore_reinit_error=True)
+        ray.init(
+            address=CONFIG.RAY_ADDRESS,
+            runtime_env={
+                "py_modules": [os.path.join(os.path.dirname(__file__), "monitor")],
+                "pip": ["psutil"],
+            },
+            ignore_reinit_error=True,
+        )
         print(f"✅ 成功连接到 Ray 集群: {CONFIG.RAY_ADDRESS}")
     except Exception as e:
         print(f"❌ 连接 Ray 集群失败: {e}")
         if CONFIG.FALLBACK_LOCAL:
             print("回退到本地模式...")
-            ray.init(ignore_reinit_error=True)
+            ray.init(
+                runtime_env={
+                    "py_modules": [os.path.join(os.path.dirname(__file__), "monitor")],
+                    "pip": ["psutil"],
+                },
+                ignore_reinit_error=True,
+            )
             print("✅ 已启动本地 Ray 集群")
         else:
             raise
 else:
-    ray.init(ignore_reinit_error=True)
+    ray.init(
+        runtime_env={
+            "py_modules": [os.path.join(os.path.dirname(__file__), "monitor")],
+            "pip": ["psutil"],
+        },
+        ignore_reinit_error=True,
+    )
     print("✅ 已启动本地 Ray 集群")
 
 print("=" * 60)

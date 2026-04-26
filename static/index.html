@@ -1754,7 +1754,9 @@
                                 <div class="detail-value">
                                     <div>阶段: ${step.stage_name || '-'}</div>
                                     <div>节点: ${step.node_id || '-'}</div>
-                                    <div>执行时间: ${step.execution_time_ms ? step.execution_time_ms + 'ms' : '-'}</div>
+                                    <div>墙钟耗时: ${step.execution_time_ms ? step.execution_time_ms + 'ms' : '-'}</div>
+                                    <div>排队时间: ${step.queue_time_ms != null ? step.queue_time_ms + 'ms' : '-'}</div>
+                                    <div>实际执行: ${step.actual_exec_time_ms != null ? step.actual_exec_time_ms + 'ms' : '-'}</div>
                                     ${step.error_msg ? `<div style="color:#ef4444;">错误: ${step.error_msg}</div>` : ''}
                                 </div>
                             </div>

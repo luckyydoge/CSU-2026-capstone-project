@@ -4,6 +4,7 @@ from models.task import TaskStatus
 from models.trace import ExecutionTrace, StepRecord
 from orchestrator.strategy_loader import load_strategy
 from config import CONFIG
+from monitor.proxy_class import monitor
 import ray
 import time
 
@@ -128,7 +129,8 @@ class RayExecutor:
 
         raw_stage_func = get_stage_function(stage_name)
         wrapped_func = RayExecutor._wrap_stage_func(raw_stage_func, target_tier)
-        remote_func = ray.remote(wrapped_func).options(**ray_options)
+        monitored_func = monitor(submission_id="ray-executor")(wrapped_func)
+        remote_func = ray.remote(monitored_func).options(**ray_options)
 
         start = datetime.utcnow()
         start_perf = time.perf_counter()
@@ -141,6 +143,16 @@ class RayExecutor:
             end = datetime.utcnow()
             exec_time_ms = (end_perf - start_perf) * 1000
 
+            actual_start_time = None
+            if output_package.get("_actual_start_time"):
+                actual_start_time = datetime.fromisoformat(output_package["_actual_start_time"])
+
+            queue_time_ms = None
+            actual_exec_time_ms_val = None
+            if actual_start_time:
+                queue_time_ms = round((actual_start_time - start).total_seconds() * 1000, 2)
+                actual_exec_time_ms_val = round((end - actual_start_time).total_seconds() * 1000, 2)
+
             node_id = node_info.get("worker_id") or node_info.get("hostname", "unknown")
             real_tier = node_info.get("tier", "unknown")
             if real_tier == "unknown":
@@ -152,7 +164,10 @@ class RayExecutor:
                 "node_tier": real_tier,
                 "execution_time_ms": exec_time_ms,
                 "start_time": start,
+                "actual_execute_time": actual_start_time,
                 "end_time": end,
+                "queue_time_ms": queue_time_ms,
+                "actual_exec_time_ms": actual_exec_time_ms_val,
                 "success": True
             }
         except Exception as e:
@@ -308,7 +323,10 @@ class RayExecutor:
                     node_id=exec_result["node_id"],
                     node_tier=exec_result["node_tier"],
                     start_time=exec_result["start_time"],
+                    execute_time=exec_result.get("actual_execute_time"),
                     end_time=exec_result["end_time"],
+                    queue_time_ms=exec_result.get("queue_time_ms"),
+                    actual_exec_time_ms=exec_result.get("actual_exec_time_ms"),
                     execution_time_ms=exec_result["execution_time_ms"],
                     transfer_time_ms=0.0,
                 )
@@ -352,7 +370,10 @@ class RayExecutor:
                 node_id=exec_result["node_id"],
                 node_tier=exec_result["node_tier"],
                 start_time=exec_result["start_time"],
+                execute_time=exec_result.get("actual_execute_time"),
                 end_time=exec_result["end_time"],
+                queue_time_ms=exec_result.get("queue_time_ms"),
+                actual_exec_time_ms=exec_result.get("actual_exec_time_ms"),
                 execution_time_ms=exec_result["execution_time_ms"],
                 transfer_time_ms=0.0,
             )

@@ -162,7 +162,10 @@ class ExecutionTraceRead(BaseModel):
     node_id: Optional[str]
     node_tier: Optional[str]
     start_time: Optional[datetime]
+    execute_time: Optional[datetime] = None
     end_time: Optional[datetime]
+    queue_time_ms: Optional[float] = None
+    actual_exec_time_ms: Optional[float] = None
     execution_time_ms: Optional[float]
     transfer_time_ms: Optional[float]
     input_size_bytes: Optional[int]

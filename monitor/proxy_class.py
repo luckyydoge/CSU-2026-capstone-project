@@ -1,4 +1,5 @@
 import time
+from datetime import datetime
 from enum import Enum
 from typing import Callable, Any, Optional, List
 import uuid
@@ -119,8 +120,13 @@ def monitor(submission_id: str, proxy_id: Optional[str] = None, **ray_kwargs: An
             _monitor_thread = threading.Thread(target=_monitor_loop, daemon=True)
             _monitor_thread.start()
 
+            actual_start_time = datetime.utcnow()
             retval = target(*args, **kwargs)
             _stop_event.set()
+
+            if isinstance(retval, dict):
+                retval["_actual_start_time"] = actual_start_time.isoformat()
+
             return retval
         
         return wrapper

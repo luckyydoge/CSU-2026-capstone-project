@@ -8,7 +8,10 @@ class StepRecord(BaseModel):
     node_id: str
     node_tier: str
     start_time: datetime
+    execute_time: Optional[datetime] = None
     end_time: datetime
+    queue_time_ms: Optional[float] = None
+    actual_exec_time_ms: Optional[float] = None
     execution_time_ms: float
     transfer_time_ms: float = 0.0
     input_size_bytes: Optional[int] = None
