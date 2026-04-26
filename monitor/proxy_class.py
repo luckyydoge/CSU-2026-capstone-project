@@ -6,7 +6,17 @@ import uuid
 import psutil
 import os
 import threading
-from ray.util.metrics import Gauge
+from ray.util.metrics import Gauge, Histogram
+
+_cpu_usage = Gauge('proxy_actor_cpu_usage', tag_keys=('node_id', 'stage_id'))
+_mem_usage = Gauge('proxy_actor_mem_usage', tag_keys=('node_id', 'stage_id'))
+_actors = Gauge('proxy_actors', tag_keys=('node_id', 'stage_id'))
+_stage_latency = Histogram(
+    'proxy_stage_latency_ms_test',
+    tag_keys=('node_id', 'stage_id'),
+    boundaries=[10, 50, 100, 200, 500, 1000, 2000, 5000, 10000],
+)
+
 
 class SubmissionType(Enum):
     UNKNOWN = 0
@@ -14,18 +24,14 @@ class SubmissionType(Enum):
     ACTOR = 2
 
 
-def monitor(submission_id: str, proxy_id: Optional[str] = None,
-            stage_id: str = "", task_id: str = "", **ray_kwargs: Any):
-    def decorator(target: Callable):        
+def monitor(stage_id: str = "", **ray_kwargs: Any):
+    def decorator(target: Callable):
         if isinstance(target, type):
-            print("decorator")
             origin_init = target.__init__
             def _monitor_loop(self):
                 while not self._stop_event.is_set():
-                    # 直接更新共享的 gauge 指标
-                    self.cpu_usage.set(self.process.cpu_percent())
-                    self.mem_usage.set(self.process.memory_info().rss / 1024 / 1024)
-                    self.test.set(1)
+                    _cpu_usage.set(self.process.cpu_percent(), tags={'node_id': self._node_id, 'stage_id': stage_id})
+                    _mem_usage.set(self.process.memory_info().rss / 1024 / 1024, tags={'node_id': self._node_id, 'stage_id': stage_id})
                     time.sleep(5)
             target._monitor_loop = _monitor_loop
 
@@ -33,35 +39,15 @@ def monitor(submission_id: str, proxy_id: Optional[str] = None,
                 origin_init(self, *args, **kwargs)
                 self._stop_event = None
                 self.proxy_actor_id = str(uuid.uuid4())[:8]
-                self.submission_id = submission_id
-                
+
+                import ray
+                try:
+                    self._node_id = ray.get_runtime_context().get_node_id()
+                except Exception:
+                    self._node_id = "unknown"
+
                 self.process = psutil.Process(os.getpid())
-                self.func = None
 
-                tags = {'actor_id': self.proxy_actor_id, 'submission_id': submission_id}
-
-                self.test = Gauge(
-                    'proxy_actors',
-                    description = 'test',
-                    tag_keys=('submission_id', 'actor_id')
-                )
-                self.cpu_usage = Gauge(
-                    'proxy_actor_cpu_usage',
-                    description = 'test',
-                    tag_keys=('submission_id', 'actor_id')
-                )
-                self.mem_usage = Gauge(
-                    'proxy_actor_mem_usage',
-                    description = 'test',
-                    tag_keys=('submission_id', 'actor_id')
-                )
-
-                self.test.set_default_tags(tags)
-                self.mem_usage.set_default_tags(tags)
-                self.cpu_usage.set_default_tags(tags)
-
-                self.target_type = SubmissionType.ACTOR
-                    
                 self._stop_event = threading.Event()
                 self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
                 self._monitor_thread.start()
@@ -75,60 +61,25 @@ def monitor(submission_id: str, proxy_id: Optional[str] = None,
                 if hasattr(self, '_stop_event') and self._stop_event is not None:
                     self._stop_event.set()
             target.__del__ = new_del
-            
+
             return target
 
         def wrapper(*args, **kwargs):
-            _stop_event = None
-            proxy_actor_id = str(uuid.uuid4())[:8]
-
-            process = psutil.Process(os.getpid())
-            func = None
-
             import ray
             try:
                 node_id = ray.get_runtime_context().get_node_id()
             except Exception:
                 node_id = "unknown"
 
-            tags = {
-                'actor_id': proxy_actor_id,
-                'submission_id': submission_id,
-                'node_id': node_id,
-                'stage_id': stage_id,
-                'task_id': task_id,
-            }
-            tag_keys = ('submission_id', 'actor_id', 'node_id', 'stage_id', 'task_id')
-
-            test = Gauge(
-                'proxy_actors',
-                description = 'test',
-                tag_keys=tag_keys,
-            )
-            cpu_usage = Gauge(
-                'proxy_actor_cpu_usage',
-                description = 'test',
-                tag_keys=tag_keys,
-            )
-            mem_usage = Gauge(
-                'proxy_actor_mem_usage',
-                description = 'test',
-                tag_keys=tag_keys,
-            )
-
-            test.set_default_tags(tags)
-            mem_usage.set_default_tags(tags)
-            cpu_usage.set_default_tags(tags)
-
-            target_type = SubmissionType.ACTOR
+            process = psutil.Process(os.getpid())
 
             _stop_event = threading.Event()
             def _monitor_loop():
+                tags = {'node_id': node_id, 'stage_id': stage_id}
                 while not _stop_event.is_set():
-                    # 直接更新共享的 gauge 指标
-                    cpu_usage.set(process.cpu_percent())
-                    mem_usage.set(process.memory_info().rss / 1024 / 1024)
-                    test.set(1)
+                    _cpu_usage.set(process.cpu_percent(), tags=tags)
+                    _mem_usage.set(process.memory_info().rss / 1024 / 1024, tags=tags)
+                    _actors.set(1, tags=tags)
                     time.sleep(5)
 
             _monitor_thread = threading.Thread(target=_monitor_loop, daemon=True)
@@ -136,13 +87,19 @@ def monitor(submission_id: str, proxy_id: Optional[str] = None,
 
             actual_start_time = datetime.utcnow()
             retval = target(*args, **kwargs)
+            actual_end_time = datetime.utcnow()
             _stop_event.set()
+
+            latency_ms = (actual_end_time - actual_start_time).total_seconds() * 1000
+            _stage_latency.observe(latency_ms, tags={'node_id': node_id, 'stage_id': stage_id})
 
             if isinstance(retval, dict):
                 retval["_actual_start_time"] = actual_start_time.isoformat()
+                retval["_actual_end_time"] = actual_end_time.isoformat()
+                retval["_latency_ms"] = latency_ms
 
             return retval
-        
+
         return wrapper
-            
+
     return decorator
