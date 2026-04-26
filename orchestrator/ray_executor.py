@@ -129,10 +129,11 @@ class RayExecutor:
 
         raw_stage_func = get_stage_function(stage_name)
         wrapped_func = RayExecutor._wrap_stage_func(raw_stage_func, target_tier)
-        monitored_func = monitor(submission_id=task_id, stage_id=stage_name, task_id=task_id)(wrapped_func)
-        remote_func = ray.remote(monitored_func).options(**ray_options)
 
         start = datetime.utcnow()
+        monitored_func = monitor(stage_id=stage_name, submit_time=start.isoformat())(wrapped_func)
+        remote_func = ray.remote(monitored_func).options(**ray_options)
+
         start_perf = time.perf_counter()
         try:
             obj_ref = remote_func.remote(stage_input)

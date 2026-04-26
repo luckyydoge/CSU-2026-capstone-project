@@ -12,7 +12,12 @@ _cpu_usage = Gauge('proxy_actor_cpu_usage', tag_keys=('node_id', 'stage_id'))
 _mem_usage = Gauge('proxy_actor_mem_usage', tag_keys=('node_id', 'stage_id'))
 _actors = Gauge('proxy_actors', tag_keys=('node_id', 'stage_id'))
 _stage_latency = Histogram(
-    'proxy_stage_latency_ms_test',
+    'proxy_stage_latency_ms',
+    tag_keys=('node_id', 'stage_id'),
+    boundaries=[10, 50, 100, 200, 500, 1000, 2000, 5000, 10000],
+)
+_queue_latency = Histogram(
+    'proxy_queue_time_ms',
     tag_keys=('node_id', 'stage_id'),
     boundaries=[10, 50, 100, 200, 500, 1000, 2000, 5000, 10000],
 )
@@ -24,7 +29,7 @@ class SubmissionType(Enum):
     ACTOR = 2
 
 
-def monitor(stage_id: str = "", **ray_kwargs: Any):
+def monitor(stage_id: str = "", submit_time: str = "", **ray_kwargs: Any):
     def decorator(target: Callable):
         if isinstance(target, type):
             origin_init = target.__init__
@@ -86,6 +91,12 @@ def monitor(stage_id: str = "", **ray_kwargs: Any):
             _monitor_thread.start()
 
             actual_start_time = datetime.utcnow()
+
+            if submit_time:
+                submit_dt = datetime.fromisoformat(submit_time)
+                queue_ms = (actual_start_time - submit_dt).total_seconds() * 1000
+                _queue_latency.observe(queue_ms, tags={'node_id': node_id, 'stage_id': stage_id})
+
             retval = target(*args, **kwargs)
             actual_end_time = datetime.utcnow()
             _stop_event.set()
