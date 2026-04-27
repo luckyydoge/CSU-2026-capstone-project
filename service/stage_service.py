@@ -31,8 +31,6 @@ class StageService:
 
     @staticmethod
     def create_stage(req: StageCreateRequest):
-        StageService.validate(req)
-        
         db_gen = get_db()
         db = next(db_gen)
         try:

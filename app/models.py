@@ -4,6 +4,21 @@ from sqlalchemy.orm import relationship
 from app.database import Base
 
 
+class Experiment(Base):
+    __tablename__ = "experiments"
+
+    exp_id = Column(String(36), primary_key=True)
+    name = Column(String(255), nullable=False)
+    app_name = Column(String(255), ForeignKey("applications.name", ondelete="CASCADE"), nullable=False)
+    input_dataset = Column(JSON)
+    strategy_group = Column(JSON)
+    rounds = Column(Integer, default=1)
+    max_retries = Column(Integer, default=1)
+    status = Column(String(20), default="pending")
+    created_at = Column(DateTime, server_default=func.now())
+    completed_at = Column(DateTime)
+
+
 class Stage(Base):
     __tablename__ = "stages"
 
@@ -124,10 +139,13 @@ class Task(Base):
     __tablename__ = "tasks"
 
     task_id = Column(String(36), primary_key=True)
+    exp_id = Column(String(36), ForeignKey("experiments.exp_id", ondelete="SET NULL"))
     app_name = Column(String(255), ForeignKey("applications.name", ondelete="CASCADE"), nullable=False)
     strategy_name = Column(String(255), ForeignKey("strategies.name", ondelete="CASCADE"), nullable=False)
     input_data_uri = Column(Text)
     final_output_uri = Column(Text)
+    runtime_config = Column(JSON)
+    retry_count = Column(Integer, default=0)
     status = Column(String(20), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
     completed_at = Column(DateTime)
@@ -159,12 +177,38 @@ class ExecutionTrace(Base):
     task = relationship("Task", back_populates="execution_traces")
 
 
+class DataTransform(Base):
+    __tablename__ = "data_transforms"
+
+    name = Column(String(255), primary_key=True)
+    input_type = Column(String(100), nullable=False)
+    output_type = Column(String(100), nullable=False)
+    handler = Column(String(500), nullable=False)
+    config = Column(JSON)
+    description = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+
+
 class MonitorRecord(Base):
     __tablename__ = "monitor_records"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False)
     status = Column(String, default="active")
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class Model(Base):
+    __tablename__ = "models"
+
+    model_id = Column(String(36), primary_key=True)
+    name = Column(String(255), nullable=False)
+    version = Column(String(50), nullable=False)
+    stage_name = Column(String(255), ForeignKey("stages.name", ondelete="SET NULL"))
+    weight_path = Column(String(500))
+    load_method = Column(String(100))
+    inference_config = Column(JSON)
+    alternative_models = Column(JSON)
     created_at = Column(DateTime, server_default=func.now())
 
 

@@ -7,44 +7,38 @@ from config import CONFIG
 import ray
 import time
 
-def get_db():
-    """获取数据库Session"""
-    from app.database import SessionLocal
-    return SessionLocal()
-
-def get_stage_function(stage_name: str):
-    """动态加载阶段函数"""
-    import os
-    import importlib.util
-    
-    db = get_db()
-    try:
-        from app.models import Stage
-        stage_info = db.query(Stage).filter(Stage.name == stage_name).first()
-        if not stage_info:
-            raise ValueError(f"Stage '{stage_name}' not found in database")
-
-        handler = stage_info.handler
-    finally:
-        db.close()
-
-    module_name, func_name = handler.split(":")
-    module_path = os.path.join(CONFIG.STAGED_CODE_DIR, f"{module_name}.py")
-
-    if not os.path.exists(module_path):
-        raise FileNotFoundError(f"Stage code file not found: {module_path}")
-
-    spec = importlib.util.spec_from_file_location(module_name, module_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    if not hasattr(module, func_name):
-        raise AttributeError(f"Function '{func_name}' not found in module '{module_name}'")
-
-    return getattr(module, func_name)
-
-
 class RayExecutor:
+
+    @staticmethod
+    def _load_stage_functions(stage_names: List[str]) -> Dict[str, Any]:
+        """批量加载阶段函数"""
+        from app.database import SessionLocal
+        from app.models import Stage
+        import os
+        import importlib.util
+        result = {}
+        db = SessionLocal()
+        try:
+            stages = db.query(Stage).filter(Stage.name.in_(stage_names)).all()
+            stage_map = {s.name: s for s in stages}
+        finally:
+            db.close()
+
+        for name in stage_names:
+            stage_info = stage_map.get(name)
+            if not stage_info:
+                raise ValueError(f"Stage '{name}' not found in database")
+            module_name, func_name = stage_info.handler.split(":")
+            module_path = os.path.join(CONFIG.STAGED_CODE_DIR, f"{module_name}.py")
+            if not os.path.exists(module_path):
+                raise FileNotFoundError(f"Stage code file not found: {module_path}")
+            spec = importlib.util.spec_from_file_location(module_name, module_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            if not hasattr(module, func_name):
+                raise AttributeError(f"Function '{func_name}' not found in module '{module_name}'")
+            result[name] = getattr(module, func_name)
+        return result
 
     @staticmethod
     def _get_next_stages(app_dict: Dict, stage_name: str) -> List[str]:
@@ -57,9 +51,14 @@ class RayExecutor:
         return next_stages
 
     @staticmethod
-    def _get_deployment_config(stage_name: str) -> Dict:
+    def _get_deployment_config(stage_name: str, db=None) -> Dict:
         """获取阶段的部署配置"""
-        db = get_db()
+        if db is None:
+            from app.database import SessionLocal
+            db = SessionLocal()
+            own_session = True
+        else:
+            own_session = False
         try:
             from app.models import DeploymentConfig
             config = db.query(DeploymentConfig).filter(DeploymentConfig.stage_name == stage_name).first()
@@ -70,10 +69,13 @@ class RayExecutor:
                 }
             return {
                 "allowed_tiers": config.allowed_tiers,
-                "resources": config.resources
+                "resources": config.resources,
+                "node_affinity": config.node_affinity,
+                "proximity": config.proximity,
             }
         finally:
-            db.close()
+            if own_session:
+                db.close()
 
     @staticmethod
     def _get_tier_resource_name(tier: str) -> str:
@@ -93,9 +95,10 @@ class RayExecutor:
         return target_tier in allowed_tiers
 
     @staticmethod
-    def _execute_stage(stage_name: str, stage_input: Any, target_tier: str) -> Dict:
+    def _execute_stage(stage_name: str, stage_input: Any, target_tier: str,
+                       stage_func=None, db=None) -> Dict:
         """执行单个阶段，返回执行结果"""
-        deploy_config = RayExecutor._get_deployment_config(stage_name)
+        deploy_config = RayExecutor._get_deployment_config(stage_name, db)
 
         allowed_tiers = deploy_config.get("allowed_tiers", ["end", "edge", "cloud"])
         if not RayExecutor._validate_tier(target_tier, allowed_tiers):
@@ -126,31 +129,61 @@ class RayExecutor:
         if memory_mb > 0:
             ray_options["memory"] = memory_mb * 1024 * 1024
 
-        raw_stage_func = get_stage_function(stage_name)
-        wrapped_func = RayExecutor._wrap_stage_func(raw_stage_func, target_tier)
+        node_affinity = deploy_config.get("node_affinity")
+        if node_affinity:
+            match_labels = node_affinity.get("match_labels", {}) if isinstance(node_affinity, dict) else {}
+            for label_key, label_val in match_labels.items():
+                ray_options["resources"][f"label_{label_key}_{label_val}"] = 0.001
+
+        proximity = deploy_config.get("proximity")
+        if proximity:
+            target = proximity.get("target_stage") if isinstance(proximity, dict) else None
+            ptype = proximity.get("proximity_type") if isinstance(proximity, dict) else None
+            print(f"[调度] 邻近需求: stage={stage_name} 靠近 {target} ({ptype})")
+
+        if stage_func is None:
+            raise ValueError(f"No stage function provided for '{stage_name}'")
+        wrapped_func = RayExecutor._wrap_stage_func(stage_func, target_tier)
         remote_func = ray.remote(wrapped_func).options(**ray_options)
 
         start = datetime.utcnow()
-        start_perf = time.perf_counter()
+        before_remote = time.perf_counter()
         try:
             obj_ref = remote_func.remote(stage_input)
             output_package = ray.get(obj_ref)
             output_data = output_package["result"]
             node_info = output_package["node_info"]
-            end_perf = time.perf_counter()
+            after_get = time.perf_counter()
             end = datetime.utcnow()
-            exec_time_ms = (end_perf - start_perf) * 1000
+
+            # 实际执行时间由 wrapper 测量并返回
+            actual_exec_ms = node_info.get("_execution_time_ms")
+            total_roundtrip_ms = (after_get - before_remote) * 1000
+            if actual_exec_ms is not None:
+                exec_time_ms = actual_exec_ms
+                transfer_time_ms = max(0.0, total_roundtrip_ms - actual_exec_ms)
+            else:
+                exec_time_ms = total_roundtrip_ms
+                transfer_time_ms = 0.0
 
             node_id = node_info.get("worker_id") or node_info.get("hostname", "unknown")
             real_tier = node_info.get("tier", "unknown")
             if real_tier == "unknown":
                 real_tier = target_tier
 
+            input_size = len(str(stage_input)) if stage_input else 0
+            output_size = len(str(output_data)) if output_data else 0
+
             return {
                 "result": output_data,
                 "node_id": node_id,
                 "node_tier": real_tier,
                 "execution_time_ms": exec_time_ms,
+                "transfer_time_ms": transfer_time_ms,
+                "input_size_bytes": input_size,
+                "output_size_bytes": output_size,
+                "cpu_percent": node_info.get("_cpu_percent"),
+                "memory_mb": node_info.get("_memory_mb"),
                 "start_time": start,
                 "end_time": end,
                 "success": True
@@ -163,9 +196,11 @@ class RayExecutor:
 
     @staticmethod
     def _wrap_stage_func(stage_func, expected_tier: str = "unknown"):
-        """包装阶段函数，添加节点信息"""
+        """包装阶段函数，添加节点信息及执行时延/资源测量"""
         def wrapper(input_data):
             import socket
+            import time
+            import os
 
             try:
                 import ray
@@ -175,13 +210,48 @@ class RayExecutor:
 
             hostname = socket.gethostname()
 
+            # 执行前采样
+            exec_before = time.perf_counter()
+            try:
+                with open(f"/proc/{os.getpid()}/status") as f:
+                    mem_info = f.read()
+                vm_rss = None
+                for line in mem_info.split("\n"):
+                    if line.startswith("VmRSS:"):
+                        vm_rss = int(line.split()[1])  # kB
+                        break
+                mem_mb = vm_rss // 1024 if vm_rss else None
+            except:
+                mem_mb = None
+
+            result = stage_func(input_data)
+
+            # 执行后采样
+            exec_after = time.perf_counter()
+            exec_time_ms = (exec_after - exec_before) * 1000
+            try:
+                with open(f"/proc/{os.getpid()}/status") as f:
+                    mem_info = f.read()
+                vm_rss = None
+                for line in mem_info.split("\n"):
+                    if line.startswith("VmRSS:"):
+                        vm_rss = int(line.split()[1])
+                        break
+                mem_after_mb = vm_rss // 1024 if vm_rss else None
+            except:
+                mem_after_mb = None
+
+            # 粗略 CPU 使用率：如果 mem_before 接近 mem_after 则简单估算
+            cpu_percent = None
+
             node_info = {
                 "hostname": hostname,
                 "node_id": str(node_id),
-                "tier": expected_tier
+                "tier": expected_tier,
+                "_execution_time_ms": exec_time_ms,
+                "_cpu_percent": cpu_percent,
+                "_memory_mb": mem_after_mb or mem_mb,
             }
-
-            result = stage_func(input_data)
 
             return {
                 "result": result,
@@ -233,11 +303,16 @@ class RayExecutor:
         return stage_input
 
     @staticmethod
-    def _get_app_dict(app_name: str) -> Dict:
+    def _get_app_dict(app_name: str, db=None) -> Dict:
         """从数据库获取应用配置"""
-        db = get_db()
+        if db is None:
+            from app.database import SessionLocal
+            db = SessionLocal()
+            own_session = True
+        else:
+            own_session = False
         try:
-            from app.models import Application, ApplicationStage, ApplicationEdge, ApplicationEntry, ApplicationExit
+            from app.models import Application, ApplicationStage, ApplicationEdge, ApplicationEntry, ApplicationExit, Stage as StageModel
             
             app = db.query(Application).filter(Application.name == app_name).first()
             if not app:
@@ -248,122 +323,257 @@ class RayExecutor:
             entries = db.query(ApplicationEntry).filter(ApplicationEntry.app_id == app.app_id).all()
             exits = db.query(ApplicationExit).filter(ApplicationExit.app_id == app.app_id).all()
             
+            # 批量查询 stage 信息，消除 N+1
+            stage_names = [s.stage_name for s in stages]
+            stage_rows = db.query(StageModel).filter(StageModel.name.in_(stage_names)).all() if stage_names else []
+            stage_info = {}
+            for st in stage_rows:
+                stage_info[st.name] = {
+                    "input_type": st.input_type,
+                    "output_type": st.output_type,
+                    "can_split": st.can_split,
+                    "split_config": st.config,
+                }
+
             return {
                 "app_id": app.app_id,
                 "name": app.name,
                 "description": app.description,
                 "input_type": app.input_type,
-                "stages": [s.stage_name for s in stages],
+                "stages": stage_names,
+                "stage_info": stage_info,
                 "edges": [
-                    {"from_stage": e.from_stage, "to_stage": e.to_stage}
+                    {"from_stage": e.from_stage, "to_stage": e.to_stage,
+                     "is_split_point": e.is_split_point if hasattr(e, 'is_split_point') else False}
                     for e in edges
                 ],
                 "entry_stage": entries[0].stage_name if entries else None,
                 "exit_stages": [e.stage_name for e in exits]
             }
         finally:
-            db.close()
+            if own_session:
+                db.close()
     
     @staticmethod
-    def execute(task_id: str, app_name: str, strategy_name: str, input_data: Any) -> Dict:
-        app_dict = RayExecutor._get_app_dict(app_name)
+    def _split_input(data: Any, split_plan: Dict) -> List:
+        """按 split_plan 将输入切分"""
+        count = split_plan.get("count", 1)
+        if isinstance(data, dict) and "file_content" in data:
+            fc = data["file_content"]
+            chunk_size = max(1, len(fc) // count)
+            parts = []
+            for i in range(count):
+                chunk = fc[i * chunk_size:(i + 1) * chunk_size] if i < count - 1 else fc[i * chunk_size:]
+                part = {**data, "file_content": chunk, "_split_index": i}
+                parts.append(part)
+            return parts
+        if isinstance(data, list):
+            chunk_size = max(1, len(data) // count)
+            return [data[i * chunk_size:(i + 1) * chunk_size] for i in range(count)]
+        return [data] * count
 
-        strategy_func = load_strategy(strategy_name)
+    @staticmethod
+    def _merge_outputs(results: List[Dict]) -> Dict:
+        """合并切分执行结果"""
+        file_contents = [r.get("file_content", b"") for r in results if isinstance(r, dict)]
+        if file_contents and any(file_contents):
+            merged = b"".join(fc for fc in file_contents if fc)
+            merged_meta = {}
+            for r in results:
+                m = r.get("metadata", {})
+                if m:
+                    merged_meta.update(m)
+            return {"file_content": merged, "metadata": merged_meta, "_merged": True}
+        return {"_merged": True, "splits": results}
 
-        trace = ExecutionTrace(task_id=task_id)
-        step_index = 0
-        current_stage = app_dict["entry_stage"]
-        current_input = input_data
-        final_output = None
+    @staticmethod
+    def execute(task_id: str, app_name: str, strategy_name: str, input_data: Any, runtime_config: Optional[Dict] = None) -> Dict:
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            app_dict = RayExecutor._get_app_dict(app_name, db)
 
-        exit_stages = app_dict.get("exit_stages", [])
+            strategy_func, strategy_type = load_strategy(strategy_name)
 
-        while True:
-            possible_next = RayExecutor._get_next_stages(app_dict, current_stage)
-            is_exit = current_stage in exit_stages
+            # 批量预加载所有阶段的函数
+            all_stage_names = app_dict.get("stages", [])
+            exit_stages = app_dict.get("exit_stages", [])
+            stage_funcs = RayExecutor._load_stage_functions(all_stage_names)
 
-            context = {
-                "current_stage": current_stage,
-                "input": current_input,
-                "possible_next_stages": possible_next,
-                "execution_history": [s.dict() for s in trace.execution_path],
-            }
+            trace = ExecutionTrace(task_id=task_id)
+            step_index = 0
+            current_stage = app_dict["entry_stage"]
+            current_input = input_data
+            final_output = None
 
-            print(f"[决策] 当前阶段={current_stage}, 可选下一步={possible_next}, is_exit={is_exit}")
+            while True:
+                possible_next = RayExecutor._get_next_stages(app_dict, current_stage)
+                is_exit = current_stage in exit_stages
 
-            if is_exit or not possible_next:
-                print(f"[执行] 运行出口阶段: {current_stage}")
+                has_split_point = False
+                stage_can_split = False
+                stage_info = app_dict.get("stage_info", {})
+                cur_info = stage_info.get(current_stage, {})
+                stage_can_split = cur_info.get("can_split", False)
+                for e in app_dict.get("edges", []):
+                    if e["from_stage"] == current_stage and e.get("is_split_point"):
+                        has_split_point = True
+                        break
+
+                context = {
+                    "current_stage": current_stage,
+                    "input": current_input,
+                    "possible_next_stages": possible_next,
+                    "execution_history": [s.dict() for s in trace.execution_path],
+                    "runtime_config": runtime_config,
+                    "is_split_point": has_split_point,
+                    "stage_can_split": stage_can_split,
+                }
+
+                print(f"[决策] 当前阶段={current_stage}, 可选下一步={possible_next}, is_exit={is_exit}")
+
+                if is_exit or not possible_next:
+                    print(f"[执行] 运行出口阶段: {current_stage}")
+                    stage_input = RayExecutor._prepare_stage_input(current_input, current_stage)
+                    deploy_config = RayExecutor._get_deployment_config(current_stage, db)
+                    target_tier = deploy_config.get("allowed_tiers", ["edge"])[0]
+                    exec_result = RayExecutor._execute_stage(current_stage, stage_input, target_tier, stage_funcs[current_stage], db)
+
+                    if not exec_result["success"]:
+                        error_msg = exec_result.get('error', 'unknown error')
+                        if strategy_type == "fallback":
+                            fb_decision = strategy_func(context, {"error": error_msg, "stage": current_stage})
+                            if fb_decision.get("action") == "skip" and fb_decision.get("next_stage"):
+                                print(f"[回退] 跳过 {current_stage} → {fb_decision['next_stage']}")
+                                current_stage = fb_decision["next_stage"]
+                                continue
+                            elif fb_decision.get("action") == "retry":
+                                print(f"[回退] 重试 {current_stage}")
+                                continue
+                        trace.error_logs.append(f"Stage {current_stage} failed: {error_msg}")
+                        raise Exception(error_msg)
+
+                    step = StepRecord(
+                        step_index=step_index, stage_name=current_stage,
+                        node_id=exec_result["node_id"], node_tier=exec_result["node_tier"],
+                        start_time=exec_result["start_time"], end_time=exec_result["end_time"],
+                        execution_time_ms=exec_result["execution_time_ms"],
+                        transfer_time_ms=exec_result.get("transfer_time_ms", 0.0),
+                        input_size_bytes=exec_result.get("input_size_bytes"),
+                        output_size_bytes=exec_result.get("output_size_bytes"),
+                        cpu_percent=exec_result.get("cpu_percent"),
+                        memory_mb=exec_result.get("memory_mb"),
+                    )
+                    trace.execution_path.append(step)
+                    final_output = exec_result["result"]
+                    print(f"[完成] 阶段 '{current_stage}' 是出口阶段，执行结束")
+                    break
+
+                decision = strategy_func(context)
+
+                if decision.get("should_terminate"):
+                    final_output = current_input
+                    print(f"[终止] 策略要求终止")
+                    break
+
+                next_stage = decision.get("next_stage")
+                if not next_stage:
+                    if len(possible_next) == 1:
+                        next_stage = possible_next[0]
+                        print(f"[默认] 策略未指定，选择唯一下一步: {next_stage}")
+                    else:
+                        raise ValueError("Strategy returned no next_stage and no unique next stage")
+
+                if next_stage not in possible_next:
+                    raise ValueError(f"Strategy returned next_stage '{next_stage}' which is not in possible_next: {possible_next}")
+
+                target_tier = decision.get("target_tier", "edge")
+                print(f"[调度决策] stage={next_stage}, target_tier={target_tier}")
+
                 stage_input = RayExecutor._prepare_stage_input(current_input, current_stage)
-                deploy_config = RayExecutor._get_deployment_config(current_stage)
-                target_tier = deploy_config.get("allowed_tiers", ["edge"])[0]
-                exec_result = RayExecutor._execute_stage(current_stage, stage_input, target_tier)
+
+                split_plan = decision.get("split_plan") if has_split_point and stage_can_split else None
+                if split_plan:
+                    print(f"[切分] 切分执行 {current_stage}, count={split_plan.get('count', 1)}")
+                    parts = RayExecutor._split_input(stage_input, split_plan)
+                    remote_func_raw = stage_funcs[current_stage]
+                    wrapped = RayExecutor._wrap_stage_func(remote_func_raw, target_tier)
+                    deploy_config = RayExecutor._get_deployment_config(current_stage, db)
+                    tier_resource = RayExecutor._get_tier_resource_name(target_tier)
+                    ray_opts = {
+                        "num_cpus": deploy_config.get("resources", {}).get("cpu_cores", 0.5),
+                        "resources": {tier_resource: 1},
+                    }
+                    remote = ray.remote(wrapped).options(**ray_opts)
+                    refs = [remote.remote(p) for p in parts]
+                    split_results = ray.get(refs)
+                    outputs = [r["result"] for r in split_results]
+                    merged_output = RayExecutor._merge_outputs(outputs)
+                    exec_result = {
+                        "result": merged_output,
+                        "node_id": "split_merged",
+                        "node_tier": target_tier,
+                        "start_time": datetime.utcnow(),
+                        "end_time": datetime.utcnow(),
+                        "execution_time_ms": sum(r.get("node_info", {}).get("_execution_time_ms", 0) for r in split_results),
+                        "transfer_time_ms": 0.0,
+                        "success": True,
+                    }
+                else:
+                    print(f"[执行] 运行阶段: {current_stage} -> {next_stage}")
+                    exec_result = RayExecutor._execute_stage(current_stage, stage_input, target_tier, stage_funcs[current_stage], db)
 
                 if not exec_result["success"]:
-                    trace.error_logs.append(f"Stage {current_stage} failed: {exec_result.get('error')}")
-                    raise Exception(exec_result.get('error'))
+                    error_msg = exec_result.get('error', 'unknown error')
+                    if strategy_type == "fallback":
+                        fb_decision = strategy_func(context, {"error": error_msg, "stage": current_stage})
+                        if fb_decision.get("action") == "skip" and fb_decision.get("next_stage"):
+                            print(f"[回退] 跳过 {current_stage} → {fb_decision['next_stage']}")
+                            current_stage = fb_decision["next_stage"]
+                            continue
+                        elif fb_decision.get("action") == "retry":
+                            print(f"[回退] 重试 {current_stage}")
+                            continue
+                    trace.error_logs.append(f"Stage {current_stage} failed: {error_msg}")
+                    raise Exception(error_msg)
 
                 step = StepRecord(
-                    step_index=step_index,
-                    stage_name=current_stage,
-                    node_id=exec_result["node_id"],
-                    node_tier=exec_result["node_tier"],
-                    start_time=exec_result["start_time"],
-                    end_time=exec_result["end_time"],
+                    step_index=step_index, stage_name=current_stage,
+                    node_id=exec_result["node_id"], node_tier=exec_result["node_tier"],
+                    start_time=exec_result["start_time"], end_time=exec_result["end_time"],
                     execution_time_ms=exec_result["execution_time_ms"],
-                    transfer_time_ms=0.0,
+                    transfer_time_ms=exec_result.get("transfer_time_ms", 0.0),
+                    input_size_bytes=exec_result.get("input_size_bytes"),
+                    output_size_bytes=exec_result.get("output_size_bytes"),
+                    cpu_percent=exec_result.get("cpu_percent"),
+                    memory_mb=exec_result.get("memory_mb"),
                 )
                 trace.execution_path.append(step)
-                final_output = exec_result["result"]
-                print(f"[完成] 阶段 '{current_stage}' 是出口阶段，执行结束")
-                break
+                current_input = exec_result["result"]
 
-            decision = strategy_func(context)
-            
-            if decision.get("should_terminate"):
-                final_output = current_input
-                print(f"[终止] 策略要求终止")
-                break
+                # 数据变换
+                stage_info = app_dict.get("stage_info", {})
+                cur_info = stage_info.get(current_stage, {})
+                next_info = stage_info.get(next_stage, {})
+                cur_out = cur_info.get("output_type")
+                next_in = next_info.get("input_type")
+                if cur_out and next_in and cur_out != next_in:
+                    from service.data_transform_service import DataTransformService
+                    transform = DataTransformService._find_transform(db, cur_out, next_in)
+                    if transform:
+                        print(f"[变换] {cur_out} → {next_in} via {transform.name}")
+                        current_input = DataTransformService.apply_transform(
+                            transform.handler, current_input, transform.config
+                        )
 
-            next_stage = decision.get("next_stage")
-            if not next_stage:
-                if len(possible_next) == 1:
-                    next_stage = possible_next[0]
-                    print(f"[默认] 策略未指定，选择唯一下一步: {next_stage}")
-                else:
-                    raise ValueError("Strategy returned no next_stage and no unique next stage")
+                current_stage = next_stage
+                step_index += 1
 
-            if next_stage not in possible_next:
-                raise ValueError(f"Strategy returned next_stage '{next_stage}' which is not in possible_next: {possible_next}")
-
-            target_tier = decision.get("target_tier", "edge")
-            print(f"[调度决策] stage={next_stage}, target_tier={target_tier}")
-
-            print(f"[执行] 运行阶段: {current_stage} -> {next_stage}")
-            stage_input = RayExecutor._prepare_stage_input(current_input, current_stage)
-            exec_result = RayExecutor._execute_stage(current_stage, stage_input, target_tier)
-
-            if not exec_result["success"]:
-                trace.error_logs.append(f"Stage {current_stage} failed: {exec_result.get('error')}")
-                raise Exception(exec_result.get('error'))
-
-            step = StepRecord(
-                step_index=step_index,
-                stage_name=current_stage,
-                node_id=exec_result["node_id"],
-                node_tier=exec_result["node_tier"],
-                start_time=exec_result["start_time"],
-                end_time=exec_result["end_time"],
-                execution_time_ms=exec_result["execution_time_ms"],
-                transfer_time_ms=0.0,
-            )
-            trace.execution_path.append(step)
-            current_input = exec_result["result"]
-            current_stage = next_stage
-            step_index += 1
-
-        trace.total_latency_ms = sum(s.execution_time_ms for s in trace.execution_path)
-        return {
-            "final_output": final_output,
-            "trace": trace.dict(),
-            "status": TaskStatus.COMPLETED.value
-        }
+            trace.total_latency_ms = sum(s.execution_time_ms for s in trace.execution_path)
+            return {
+                "final_output": final_output,
+                "trace": trace.dict(),
+                "status": TaskStatus.COMPLETED.value
+            }
+        finally:
+            db.close()

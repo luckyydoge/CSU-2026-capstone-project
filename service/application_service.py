@@ -1,7 +1,7 @@
 import uuid
 from typing import Dict, List, Set, Optional
 from collections import defaultdict, deque
-from models.application import ApplicationCreateRequest
+from models.application import ApplicationCreateRequest, StageSchema
 from app.database import SessionLocal
 from app.schemas import ApplicationCreate
 from app.models import (
@@ -26,7 +26,7 @@ class ApplicationService:
         db_gen = get_db()
         db = next(db_gen)
         try:
-            stage_names = set(req.stages)
+            stage_names = set[StageSchema](req.stages)
             for stage_name in stage_names:
                 stage = db.query(Stage).filter(Stage.name == stage_name).first()
                 if not stage:

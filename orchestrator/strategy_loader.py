@@ -1,14 +1,13 @@
 import importlib
-from typing import Dict, Any, Callable
+from typing import Dict, Any, Callable, Tuple
 
 def get_db():
     """获取数据库Session"""
     from app.database import SessionLocal
     return SessionLocal()
 
-def load_strategy(strategy_name: str) -> Callable:
-    """动态加载策略，支持 module.function 或 module:function 格式，也支持 module:ClassName（类需要实现 decide 方法）"""
-    # 从数据库加载策略
+def load_strategy(strategy_name: str) -> Tuple[Callable, str]:
+    """动态加载策略，返回 (callable, strategy_type)"""
     db = get_db()
     strategy_info = None
     try:
@@ -31,29 +30,29 @@ def load_strategy(strategy_name: str) -> Callable:
     handler = strategy_info["handler"]
     config = strategy_info.get("config", {})
 
-    # 解析 handler: 支持 "module:func" 或 "module.func" 或 "module:Class"
     if ":" in handler:
         module_path, entry = handler.split(":", 1)
     else:
         module_path, entry = handler.rsplit(".", 1)
 
     module = importlib.import_module(module_path)
-
-    # 尝试获取属性
     obj = getattr(module, entry)
 
-    # 判断是可调用类还是函数
     if callable(obj) and not isinstance(obj, type):
-        # 函数形式，包装 config
-        def wrapped(context):
+        def wrapped(context, extra=None):
+            if extra:
+                return obj(context, extra, config)
             return obj(context, config)
-        return wrapped
+        return wrapped, strategy_info["strategy_type"]
     elif isinstance(obj, type):
-        # 类形式，实例化并返回 decide 方法
         instance = obj(config)
         if hasattr(instance, "decide"):
-            return instance.decide
+            return instance.decide, strategy_info["strategy_type"]
+        elif hasattr(instance, "decide_split"):
+            return instance.decide_split, strategy_info["strategy_type"]
+        elif hasattr(instance, "decide_fallback"):
+            return instance.decide_fallback, strategy_info["strategy_type"]
         else:
-            raise ValueError(f"Class {entry} does not have 'decide' method")
+            raise ValueError(f"Class {entry} has no 'decide'/'decide_split'/'decide_fallback' method")
     else:
         raise ValueError(f"Handler {handler} does not point to a callable function or class")

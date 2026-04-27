@@ -29,8 +29,6 @@ class StrategyService:
 
     @staticmethod
     def create_strategy(req: StrategyCreateRequest) -> Dict:
-        StrategyService.validate(req)
-        
         db_gen = get_db()
         db = next(db_gen)
         try:

@@ -33,8 +33,6 @@ class DeploymentService:
 
     @staticmethod
     def create_deployment(req: DeploymentConfigCreateRequest) -> Dict:
-        DeploymentService.validate(req)
-        
         db_gen = get_db()
         db = next(db_gen)
         try:

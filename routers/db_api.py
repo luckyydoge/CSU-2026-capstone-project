@@ -1,20 +1,26 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Stage, Strategy, DeploymentConfig, Application, Task, ExecutionTrace
+from app.models import Stage, Strategy, DeploymentConfig, Application, Experiment, Task, ExecutionTrace
 from app.schemas import (
     StageCreate, StageRead,
     StrategyCreate, StrategyRead,
     DeploymentConfigCreate, DeploymentConfigRead,
     ApplicationCreate, ApplicationRead,
     TaskCreate, TaskRead,
-    ExecutionTraceRead
+    ExecutionTraceRead,
+    ModelCreate, ModelRead,
+    ExperimentCreate, ExperimentRead, ExperimentReport,
+    DataTransformCreate, DataTransformRead,
 )
 from service.stage_service import StageService
 from service.strategy_service import StrategyService
 from service.deployment_service import DeploymentService
 from service.application_service import ApplicationService
 from service.task_service import TaskService
+from service.model_service import ModelService
+from service.experiment_service import ExperimentService
+from service.data_transform_service import DataTransformService
 from orchestrator.ray_executor import RayExecutor
 from models.task import TaskStatus
 
@@ -70,6 +76,79 @@ def get_strategy(name: str, db: Session = Depends(get_db)):
     return strategy
 
 
+@router.post("/models", response_model=ModelRead, status_code=201)
+def create_model(req: ModelCreate, db: Session = Depends(get_db)):
+    try:
+        model = ModelService._create_model_db(db, req)
+        return model
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/models", response_model=list[ModelRead])
+def list_models(db: Session = Depends(get_db)):
+    models = ModelService._list_models_db(db)
+    return list(models.values())
+
+
+@router.get("/models/{model_id}", response_model=ModelRead)
+def get_model(model_id: str, db: Session = Depends(get_db)):
+    model = ModelService._get_model_db(db, model_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    return model
+
+
+@router.put("/models/{model_id}", response_model=ModelRead)
+def update_model(model_id: str, req: ModelCreate, db: Session = Depends(get_db)):
+    try:
+        model = ModelService._update_model_db(db, model_id, req)
+        return model
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/models/{model_id}", status_code=204)
+def delete_model(model_id: str, db: Session = Depends(get_db)):
+    try:
+        ModelService._delete_model_db(db, model_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/data-transforms", status_code=201)
+def create_data_transform(req: DataTransformCreate, db: Session = Depends(get_db)):
+    try:
+        dt = DataTransformService._create_db(
+            db, req.name, req.input_type, req.output_type,
+            req.handler, req.config, req.description
+        )
+        return dt
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/data-transforms", response_model=list[DataTransformRead])
+def list_data_transforms(db: Session = Depends(get_db)):
+    return list(DataTransformService._list_db(db).values())
+
+
+@router.get("/data-transforms/{name}", response_model=DataTransformRead)
+def get_data_transform(name: str, db: Session = Depends(get_db)):
+    dt = DataTransformService._get_db(db, name)
+    if not dt:
+        raise HTTPException(status_code=404, detail="DataTransform not found")
+    return dt
+
+
+@router.delete("/data-transforms/{name}", status_code=204)
+def delete_data_transform(name: str, db: Session = Depends(get_db)):
+    try:
+        DataTransformService._delete_db(db, name)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @router.post("/deployments", response_model=DeploymentConfigRead, status_code=201)
 def create_deployment(req: DeploymentConfigCreate, db: Session = Depends(get_db)):
     try:
@@ -116,6 +195,54 @@ def get_application(name: str, db: Session = Depends(get_db)):
     if not app:
         raise HTTPException(status_code=404, detail="Application not found")
     return app
+
+
+@router.post("/experiments", status_code=201)
+def create_experiment(req: ExperimentCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    try:
+        exp, task_ids = ExperimentService._create_experiment_db(db, req)
+        for tid in task_ids:
+            background_tasks.add_task(execute_db_task, tid)
+        return {"exp_id": exp.exp_id, "name": exp.name, "task_count": len(task_ids), "message": "Experiment created"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/experiments", response_model=list[ExperimentRead])
+def list_experiments(db: Session = Depends(get_db)):
+    exps = ExperimentService._list_experiments_db(db)
+    result = []
+    for e in exps.values():
+        task_count = db.query(Task).filter(Task.exp_id == e.exp_id).count()
+        result.append(ExperimentRead(
+            exp_id=e.exp_id, name=e.name, app_name=e.app_name,
+            strategy_group=e.strategy_group, input_dataset=e.input_dataset,
+            rounds=e.rounds, status=e.status, task_count=task_count,
+            created_at=e.created_at, completed_at=e.completed_at,
+        ))
+    return result
+
+
+@router.get("/experiments/{exp_id}")
+def get_experiment(exp_id: str, db: Session = Depends(get_db)):
+    exp = ExperimentService._get_experiment_db(db, exp_id)
+    if not exp:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    task_count = db.query(Task).filter(Task.exp_id == exp_id).count()
+    return ExperimentRead(
+        exp_id=exp.exp_id, name=exp.name, app_name=exp.app_name,
+        strategy_group=exp.strategy_group, input_dataset=exp.input_dataset,
+        rounds=exp.rounds, status=exp.status, task_count=task_count,
+        created_at=exp.created_at, completed_at=exp.completed_at,
+    )
+
+
+@router.get("/experiments/{exp_id}/report", response_model=ExperimentReport)
+def get_experiment_report(exp_id: str, db: Session = Depends(get_db)):
+    report = ExperimentService._get_experiment_report_db(db, exp_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    return report
 
 
 @router.post("/tasks", status_code=202)
@@ -178,7 +305,8 @@ def execute_db_task(task_id: str):
                 task_id=task_id,
                 app_name=task.app_name,
                 strategy_name=task.strategy_name,
-                input_data=input_data
+                input_data=input_data,
+                runtime_config=task.runtime_config
             )
             
             trace = result["trace"]
@@ -196,17 +324,57 @@ def execute_db_task(task_id: str):
                                                input_size_bytes=step_dict.get("input_size_bytes"),
                                                output_size_bytes=step_dict.get("output_size_bytes"),
                                                cpu_percent=step_dict.get("cpu_percent"), 
-                                               memory_mb=step_dict.get("memory_mb"))
-            
+                                               memory_mb=step_dict.get("memory_mb"),
+                                               _commit=False)
+            db.commit()
+
             TaskService._update_task_status_db(db, task_id, result["status"],
                                             result["final_output"])
+
+            # 如果属于实验，检查实验是否全部完成
+            if task.exp_id:
+                pending_count = db.query(Task).filter(
+                    Task.exp_id == task.exp_id,
+                    Task.status.in_([TaskStatus.PENDING.value, TaskStatus.RUNNING.value])
+                ).count()
+                if pending_count == 0:
+                    ExperimentService._update_experiment_status_db(db, task.exp_id, "completed")
             
         except Exception as e:
             import traceback
             error_msg = f"{str(e)}\n{traceback.format_exc()}"
             TaskService._add_trace_record_db(db, task_id, 0, "system",
                                            error_msg=error_msg)
-            TaskService._update_task_status_db(db, task_id, TaskStatus.FAILED.value)
+
+            # 重试逻辑：仅对实验任务，且 retry_count < max_retries
+            retried = False
+            if task.exp_id:
+                exp = ExperimentService._get_experiment_db(db, task.exp_id)
+                max_r = exp.max_retries if exp else 0
+                rc = task.retry_count or 0
+                if rc < max_r:
+                    task.retry_count = rc + 1
+                    task.status = TaskStatus.PENDING.value
+                    db.commit()
+                    retried = True
+                    execute_db_task(task_id)  # 递归重试
+
+            if not retried:
+                TaskService._update_task_status_db(db, task_id, TaskStatus.FAILED.value)
+
+                # 如果属于实验，检查实验是否全部完成（含失败）
+                if task.exp_id:
+                    pending_count = db.query(Task).filter(
+                        Task.exp_id == task.exp_id,
+                        Task.status.in_([TaskStatus.PENDING.value, TaskStatus.RUNNING.value])
+                    ).count()
+                    if pending_count == 0:
+                        has_failed = db.query(Task).filter(
+                            Task.exp_id == task.exp_id,
+                            Task.status == TaskStatus.FAILED.value
+                        ).count()
+                        status = "completed_with_errors" if has_failed else "completed"
+                        ExperimentService._update_experiment_status_db(db, task.exp_id, status)
             
     finally:
         db.close()

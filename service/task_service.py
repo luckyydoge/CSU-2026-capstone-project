@@ -36,17 +36,16 @@ class TaskService:
 
     @staticmethod
     def create_task(req: TaskCreateRequest) -> Dict:
-        TaskService.validate(req)
-        
         db_gen = get_db()
         db = next(db_gen)
         try:
+            input_uri = json.dumps(req.input_data) if req.input_data else None
             task_create = TaskCreate(
                 app_name=req.application_name,
                 strategy_name=req.strategy_name,
-                input_data_uri=json.dumps(req.input_data) if req.input_data else None
+                input_data_uri=input_uri,
             )
-            return TaskService._create_task_db(db, task_create, json.dumps(req.input_data) if req.input_data else None)
+            return TaskService._create_task_db(db, task_create, input_uri)
         finally:
             db_gen.close()
 
@@ -172,7 +171,8 @@ class TaskService:
                     task_id=task_id,
                     app_name=task.app_name,
                     strategy_name=task.strategy_name,
-                    input_data=input_data
+                    input_data=input_data,
+                    runtime_config=task.runtime_config
                 )
 
                 trace = result["trace"]
@@ -190,7 +190,9 @@ class TaskService:
                                                     input_size_bytes=step_dict.get("input_size_bytes"),
                                                     output_size_bytes=step_dict.get("output_size_bytes"),
                                                     cpu_percent=step_dict.get("cpu_percent"),
-                                                    memory_mb=step_dict.get("memory_mb"))
+                                                    memory_mb=step_dict.get("memory_mb"),
+                                                    _commit=False)
+                db.commit()
 
                 TaskService._update_task_status_db(db, task_id, result["status"],
                                                 result["final_output"])
@@ -222,6 +224,7 @@ class TaskService:
             app_name=req.app_name,
             strategy_name=req.strategy_name,
             input_data_uri=input_data_uri or req.input_data_uri,
+            runtime_config=req.runtime_config,
             status=TaskStatus.PENDING.value,
             created_at=datetime.now()
         )
@@ -266,7 +269,8 @@ class TaskService:
                         execution_time_ms: Optional[float] = None, transfer_time_ms: Optional[float] = None,
                         input_size_bytes: Optional[int] = None, output_size_bytes: Optional[int] = None,
                         cpu_percent: Optional[float] = None, memory_mb: Optional[int] = None,
-                        error_msg: Optional[str] = None):
+                        error_msg: Optional[str] = None,
+                        _commit: bool = True):
         trace = ExecutionTrace(
             task_id=task_id,
             step_index=step_index,
@@ -284,7 +288,8 @@ class TaskService:
             error_msg=error_msg
         )
         db.add(trace)
-        db.commit()
+        if _commit:
+            db.commit()
         return trace
     
     @staticmethod

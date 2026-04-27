@@ -17,6 +17,30 @@ class MonitorRecordRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ModelCreate(BaseModel):
+    name: str
+    version: str = "1.0"
+    stage_name: Optional[str] = None
+    weight_path: Optional[str] = None
+    load_method: Optional[str] = None
+    inference_config: Optional[Dict[str, Any]] = None
+    alternative_models: Optional[Dict[str, Any]] = None
+
+
+class ModelRead(BaseModel):
+    model_id: str
+    name: str
+    version: str
+    stage_name: Optional[str]
+    weight_path: Optional[str]
+    load_method: Optional[str]
+    inference_config: Optional[Dict[str, Any]]
+    alternative_models: Optional[Dict[str, Any]]
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class StageCreate(BaseModel):
     name: str
     description: Optional[str] = None
@@ -126,6 +150,7 @@ class TaskCreate(BaseModel):
     app_name: str
     strategy_name: str
     input_data_uri: Optional[str] = None
+    runtime_config: Optional[Dict[str, Any]] = None
 
 
 class TaskRead(BaseModel):
@@ -152,6 +177,65 @@ class TaskRead(BaseModel):
             except (json.JSONDecodeError, TypeError):
                 instance.final_output = instance.final_output_uri
         return instance
+
+
+class DataTransformCreate(BaseModel):
+    name: str
+    input_type: str
+    output_type: str
+    handler: str
+    config: Optional[Dict[str, Any]] = None
+    description: Optional[str] = None
+
+
+class DataTransformRead(BaseModel):
+    name: str
+    input_type: str
+    output_type: str
+    handler: str
+    config: Optional[Dict[str, Any]]
+    description: Optional[str]
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ExperimentCreate(BaseModel):
+    name: str
+    app_name: str
+    strategy_group: List[str]
+    input_dataset: List[Any]
+    rounds: int = 1
+    max_retries: int = 1
+
+
+class ExperimentRead(BaseModel):
+    exp_id: str
+    name: str
+    app_name: str
+    strategy_group: List[Any]
+    input_dataset: List[Any]
+    rounds: int
+    status: str
+    task_count: Optional[int] = None
+    created_at: datetime
+    completed_at: Optional[datetime]
+
+    model_config = {"from_attributes": True}
+
+
+class ExperimentReport(BaseModel):
+    exp_id: str
+    name: str
+    status: str
+    total_tasks: int
+    completed_tasks: int
+    failed_tasks: int
+    avg_execution_time_ms: Optional[float]
+    strategy_breakdown: List[Dict[str, Any]]
+    stage_breakdown: List[Dict[str, Any]]
+    created_at: datetime
+    completed_at: Optional[datetime]
 
 
 class ExecutionTraceRead(BaseModel):
