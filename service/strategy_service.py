@@ -1,121 +1,38 @@
 from typing import Dict, Optional
-from models.strategy import StrategyCreateRequest
-from app.database import SessionLocal
 from app.schemas import StrategyCreate
 from app.models import Strategy
 from sqlalchemy.orm import Session
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
 class StrategyService:
-    # ========== 内部管理 DB 的接口（供 /api/v1/ 使用） ==========
-    @staticmethod
-    def validate(req: StrategyCreateRequest):
-        if not req.name:
-            raise ValueError("Strategy name required")
-        if not req.strategy_type:
-            raise ValueError("Strategy type required")
-        if not req.handler:
-            raise ValueError("Handler required")
-        if ":" not in req.handler:
-            raise ValueError("Handler must be in format 'module:function'")
-
-    @staticmethod
-    def create_strategy(req: StrategyCreateRequest) -> Dict:
-        db_gen = get_db()
-        db = next(db_gen)
-        try:
-            strategy_create = StrategyCreate(
-                name=req.name,
-                strategy_type=req.strategy_type,
-                handler=req.handler,
-                config=req.config,
-                description=req.description
-            )
-            return StrategyService._create_strategy_db(db, strategy_create)
-        finally:
-            db_gen.close()
-
-    @staticmethod
-    def get_strategy(name: str) -> Optional[Dict]:
-        db_gen = get_db()
-        db = next(db_gen)
-        try:
-            strategy = StrategyService._get_strategy_db(db, name)
-            if strategy:
-                return {
-                    "name": strategy.name,
-                    "strategy_type": strategy.strategy_type,
-                    "handler": strategy.handler,
-                    "config": strategy.config,
-                    "description": strategy.description
-                }
-            return None
-        finally:
-            db_gen.close()
-
-    @staticmethod
-    def list_strategies() -> Dict:
-        db_gen = get_db()
-        db = next(db_gen)
-        try:
-            strategies = StrategyService._list_strategies_db(db)
-            result = {}
-            for name, strategy in strategies.items():
-                result[name] = {
-                    "name": strategy.name,
-                    "strategy_type": strategy.strategy_type,
-                    "handler": strategy.handler,
-                    "config": strategy.config,
-                    "description": strategy.description
-                }
-            return result
-        finally:
-            db_gen.close()
-    
-    @staticmethod
-    def update_strategy(name: str, req: StrategyCreateRequest) -> Dict:
-        db_gen = get_db()
-        db = next(db_gen)
-        try:
-            strategy_create = StrategyCreate(
-                name=req.name,
-                strategy_type=req.strategy_type,
-                handler=req.handler,
-                config=req.config,
-                description=req.description
-            )
-            return StrategyService._update_strategy_db(db, name, strategy_create)
-        finally:
-            db_gen.close()
-    
-    @staticmethod
-    def delete_strategy(name: str) -> Dict:
-        db_gen = get_db()
-        db = next(db_gen)
-        try:
-            return StrategyService._delete_strategy_db(db, name)
-        finally:
-            db_gen.close()
-    
-    # ========== 外部传入 DB 的接口（供 /db/v1/ 使用） ==========
+    # ========== 外部传入 DB 的接口 ==========
     @staticmethod
     def _validate_db(req: StrategyCreate):
         if not req.name:
             raise ValueError("Strategy name required")
         if not req.strategy_type:
-            raise ValueError("Strategy type required")
+            req.strategy_type = "routing"
         if not req.handler:
             raise ValueError("Handler required")
         if ":" not in req.handler:
             raise ValueError("Handler must be in format 'module:function'")
+        # 校验 handler 引用的代码文件存在且包含该函数
+        import os, importlib.util
+        from config import CONFIG
+        module_name, func_name = req.handler.split(":", 1)
+        file_path = os.path.join(CONFIG.STRATEGY_CODE_DIR, f"{module_name}.py")
+        if not os.path.exists(file_path):
+            raise ValueError(f"Handler code file not found: strategy_code/{module_name}.py")
+        try:
+            spec = importlib.util.spec_from_file_location(module_name, file_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            if not hasattr(module, func_name):
+                raise ValueError(f"Function '{func_name}' not found in module '{module_name}'")
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"Failed to load handler module: {e}")
     
     @staticmethod
     def _create_strategy_db(db: Session, req: StrategyCreate):
@@ -174,14 +91,28 @@ class StrategyService:
     
     @staticmethod
     def _delete_strategy_db(db: Session, name: str):
+        from config import CONFIG
+        import os
         strategy = db.query(Strategy).filter(Strategy.name == name).first()
         if not strategy:
             raise ValueError(f"Strategy not found: {name}")
-        
+
+        # 检查是否被任务引用
+        from app.models import Task
+        task_count = db.query(Task).filter(Task.strategy_name == name).count()
+        if task_count > 0:
+            raise ValueError(f"Cannot delete strategy '{name}': it is referenced by {task_count} task(s).")
+
+        handler = strategy.handler
+        module_name = handler.split(":")[0]
+        file_path = os.path.join(CONFIG.STRATEGY_CODE_DIR, f"{module_name}.py")
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
         db.delete(strategy)
         db.commit()
-        
+
         return {
             "strategy_name": name,
-            "message": "Strategy deleted successfully"
+            "message": "Strategy and code file deleted successfully"
         }

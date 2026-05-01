@@ -2,6 +2,14 @@ from sqlalchemy import Column, Integer, String, DateTime, func, Boolean, Float, 
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import relationship
 from app.database import Base
+from enum import Enum
+
+
+class TaskStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
 
 class Experiment(Base):
@@ -14,6 +22,8 @@ class Experiment(Base):
     strategy_group = Column(JSON)
     rounds = Column(Integer, default=1)
     max_retries = Column(Integer, default=1)
+    output_location = Column(String(500))
+    result_method = Column(String(50), default="db")
     status = Column(String(20), default="pending")
     created_at = Column(DateTime, server_default=func.now())
     completed_at = Column(DateTime)
@@ -33,6 +43,7 @@ class Stage(Base):
     config = Column(JSON)
     dependencies = Column(JSON)
     runtime_env = Column(JSON)
+    parent_stage = Column(String(255), ForeignKey("stages.name", ondelete="SET NULL"))
     can_split = Column(Boolean, default=False)
     is_deployable = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
@@ -186,6 +197,22 @@ class DataTransform(Base):
     handler = Column(String(500), nullable=False)
     config = Column(JSON)
     description = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class NodeInfo(Base):
+    __tablename__ = "node_info"
+
+    node_id = Column(String(255), primary_key=True)
+    hostname = Column(String(255))
+    tier = Column(String(20))
+    ip_address = Column(String(50))
+    cpu_cores = Column(Integer)
+    memory_mb = Column(Integer)
+    current_cpu_percent = Column(Float)
+    current_memory_percent = Column(Float)
+    network_latency_ms = Column(Float)
+    last_heartbeat = Column(DateTime)
     created_at = Column(DateTime, server_default=func.now())
 
 

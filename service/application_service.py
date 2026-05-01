@@ -1,172 +1,78 @@
 import uuid
 from typing import Dict, List, Set, Optional
 from collections import defaultdict, deque
-from models.application import ApplicationCreateRequest
-from app.database import SessionLocal
 from app.schemas import ApplicationCreate
 from app.models import (
     Application, Stage, ApplicationStage, ApplicationEdge, 
-    ApplicationEntry, ApplicationExit
+    ApplicationEntry, ApplicationExit, DataTransform
 )
 from sqlalchemy.orm import Session
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
 class ApplicationService:
-    # ========== 内部管理 DB 的接口（供 /api/v1/ 使用） ==========
-    @staticmethod
-    def validate(req: ApplicationCreateRequest):
-        db_gen = get_db()
-        db = next(db_gen)
-        try:
-            stage_names = set(req.stages)
-            for stage_name in stage_names:
-                stage = db.query(Stage).filter(Stage.name == stage_name).first()
-                if not stage:
-                    raise ValueError(f"Stage not found: {stage_name}")
-            
-            if req.entry_stage not in stage_names:
-                raise ValueError(f"Entry stage '{req.entry_stage}' not in stages")
-            
-            for exit_stage in req.exit_stages:
-                if exit_stage not in stage_names:
-                    raise ValueError(f"Exit stage '{exit_stage}' not in stages")
-            
-            for edge in req.edges:
-                if edge.from_stage not in stage_names:
-                    raise ValueError(f"Edge from_stage '{edge.from_stage}' not in stages")
-                if edge.to_stage not in stage_names:
-                    raise ValueError(f"Edge to_stage '{edge.to_stage}' not in stages")
-            
-            graph = defaultdict(list)
-            for edge in req.edges:
-                graph[edge.from_stage].append(edge.to_stage)
-            
-            visited = set()
-            rec_stack = set()
-            
-            def has_cycle(node: str) -> bool:
-                if node in rec_stack:
-                    return True
-                if node in visited:
-                    return False
-                visited.add(node)
-                rec_stack.add(node)
-                for neighbor in graph.get(node, []):
-                    if has_cycle(neighbor):
-                        return True
-                rec_stack.remove(node)
-                return False
-            
-            if has_cycle(req.entry_stage):
-                raise ValueError("Cycle detected, application graph must be DAG")
-            
-            reachable = set()
-            queue = deque([req.entry_stage])
-            while queue:
-                node = queue.popleft()
-                if node in reachable:
-                    continue
-                reachable.add(node)
-                for neighbor in graph.get(node, []):
-                    queue.append(neighbor)
-            
-            unreachable = stage_names - reachable
-            if unreachable:
-                raise ValueError(f"Unreachable stages (islands): {unreachable}")
-        finally:
-            db_gen.close()
-
-    @staticmethod
-    def create_application(req: ApplicationCreateRequest) -> Dict:
-        ApplicationService.validate(req)
-        
-        db_gen = get_db()
-        db = next(db_gen)
-        try:
-            app_create = ApplicationCreate(
-                name=req.name,
-                description=req.description,
-                input_type=req.input_type,
-                stages=req.stages,
-                edges=req.edges,
-                entry_stage=req.entry_stage,
-                exit_stages=req.exit_stages
-            )
-            return ApplicationService._create_application_db(db, app_create)
-        finally:
-            db_gen.close()
-
-    @staticmethod
-    def get_application(app_id: str) -> Optional[Dict]:
-        db_gen = get_db()
-        db = next(db_gen)
-        try:
-            app = ApplicationService._get_application_db(db, app_id)
-            if app:
-                return ApplicationService._get_application_dict_db(db, app.name)
-            return None
-        finally:
-            db_gen.close()
-
-    @staticmethod
-    def get_application_by_name(name: str) -> Optional[Dict]:
-        db_gen = get_db()
-        db = next(db_gen)
-        try:
-            return ApplicationService._get_application_dict_db(db, name)
-        finally:
-            db_gen.close()
-
-    @staticmethod
-    def list_applications() -> Dict:
-        db_gen = get_db()
-        db = next(db_gen)
-        try:
-            apps = ApplicationService._list_applications_db(db)
-            result = {}
-            for name, app in apps.items():
-                result[name] = ApplicationService._get_application_dict_db(db, name)
-            return result
-        finally:
-            db_gen.close()
-    
-    # ========== 外部传入 DB 的接口（供 /db/v1/ 使用） ==========
+    # ========== 外部传入 DB 的接口 ==========
     @staticmethod
     def _validate_db(db: Session, req: ApplicationCreate):
         stage_names = set(req.stages)
+        # 查询所有阶段的类型信息
+        stage_rows = db.query(Stage).filter(Stage.name.in_(stage_names)).all() if stage_names else []
+        type_map = {s.name: {"input_type": s.input_type, "output_type": s.output_type} for s in stage_rows}
+
         for stage_name in stage_names:
-            stage = db.query(Stage).filter(Stage.name == stage_name).first()
-            if not stage:
+            if stage_name not in type_map:
                 raise ValueError(f"Stage not found: {stage_name}")
-        
+
         if req.entry_stage not in stage_names:
             raise ValueError(f"Entry stage '{req.entry_stage}' not in stages")
-        
+
         for exit_stage in req.exit_stages:
             if exit_stage not in stage_names:
                 raise ValueError(f"Exit stage '{exit_stage}' not in stages")
-        
+
+        # 建立入边/出边索引
+        in_edges = defaultdict(set)
+        out_edges = defaultdict(set)
         for edge in req.edges:
             if edge.from_stage not in stage_names:
                 raise ValueError(f"Edge from_stage '{edge.from_stage}' not in stages")
             if edge.to_stage not in stage_names:
                 raise ValueError(f"Edge to_stage '{edge.to_stage}' not in stages")
-        
+            out_edges[edge.from_stage].add(edge.to_stage)
+            in_edges[edge.to_stage].add(edge.from_stage)
+
+        # 入口阶段不应有入边
+        if req.entry_stage in in_edges:
+            raise ValueError(f"Entry stage '{req.entry_stage}' has incoming edge(s), which is not allowed")
+
+        # 出口阶段不应有出边
+        for es in req.exit_stages:
+            if es in out_edges:
+                raise ValueError(f"Exit stage '{es}' has outgoing edge(s), which is not allowed")
+
+        # 输入/输出类型连续性校验
+        for edge in req.edges:
+            from_type = type_map.get(edge.from_stage, {}).get("output_type")
+            to_type = type_map.get(edge.to_stage, {}).get("input_type")
+            if from_type and to_type and from_type != to_type:
+                transform = db.query(DataTransform).filter(
+                    DataTransform.input_type == from_type,
+                    DataTransform.output_type == to_type,
+                ).first()
+                if not transform:
+                    raise ValueError(
+                        f"Type mismatch: '{edge.from_stage}' outputs '{from_type}' "
+                        f"but '{edge.to_stage}' expects '{to_type}'. "
+                        f"Register a DataTransform from '{from_type}' to '{to_type}' to fix."
+                    )
+
         graph = defaultdict(list)
         for edge in req.edges:
             graph[edge.from_stage].append(edge.to_stage)
-        
+
+        # 环检测
         visited = set()
         rec_stack = set()
-        
+
         def has_cycle(node: str) -> bool:
             if node in rec_stack:
                 return True
@@ -179,10 +85,11 @@ class ApplicationService:
                     return True
             rec_stack.remove(node)
             return False
-        
+
         if has_cycle(req.entry_stage):
             raise ValueError("Cycle detected, application graph must be DAG")
-        
+
+        # 可达性检测（独立 BFS，不依赖环检测的 visited）
         reachable = set()
         queue = deque([req.entry_stage])
         while queue:
@@ -192,7 +99,7 @@ class ApplicationService:
             reachable.add(node)
             for neighbor in graph.get(node, []):
                 queue.append(neighbor)
-        
+
         unreachable = stage_names - reachable
         if unreachable:
             raise ValueError(f"Unreachable stages (islands): {unreachable}")
@@ -287,9 +194,24 @@ class ApplicationService:
             "input_type": app.input_type,
             "stages": [app_stage.stage_name for app_stage in app_stages],
             "edges": [
-                {"from_stage": ae.from_stage, "to_stage": ae.to_stage}
+                {"from_stage": ae.from_stage, "to_stage": ae.to_stage,
+                 "is_split_point": ae.is_split_point if hasattr(ae, 'is_split_point') else False}
                 for ae in app_edges
             ],
             "entry_stage": app_entries[0].stage_name if app_entries else None,
             "exit_stages": [ae.stage_name for ae in app_exits]
         }
+
+    @staticmethod
+    def _delete_application_db(db: Session, name: str):
+        from app.models import Task, ExecutionTrace
+        app = db.query(Application).filter(Application.name == name).first()
+        if not app:
+            raise ValueError(f"Application not found: {name}")
+        # 先删关联的 Task 和 ExecutionTrace
+        tasks = db.query(Task).filter(Task.app_name == name).all()
+        for t in tasks:
+            db.query(ExecutionTrace).filter(ExecutionTrace.task_id == t.task_id).delete()
+            db.delete(t)
+        db.delete(app)
+        db.commit()
