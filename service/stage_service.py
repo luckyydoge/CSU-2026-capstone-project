@@ -1,114 +1,12 @@
-# service/stage_service.py
-import uuid
 from typing import Dict, List, Optional
-from models.stage import StageCreateRequest
-from app.database import SessionLocal
 from app.schemas import StageCreate
-from app.models import Stage
+from app.models import Stage, Model
 from sqlalchemy.orm import Session
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
 class StageService:
-    # ========== 内部管理 DB 的接口（供 /api/v1/ 使用） ==========
     @staticmethod
-    def validate(req: StageCreateRequest):
-        if not req.name:
-            raise ValueError("Stage name required")
-        if ":" not in req.handler:
-            raise ValueError("Handler must be in format 'module:function' (e.g., 'my_stage:run')")
-        if not req.input_type:
-            raise ValueError("input_type 不能为空")
-        if not req.output_type:
-            raise ValueError("output_type 不能为空")
-
-    @staticmethod
-    def create_stage(req: StageCreateRequest):
-        db_gen = get_db()
-        db = next(db_gen)
-        try:
-            stage_create = StageCreate(
-                name=req.name,
-                description=req.description,
-                handler=req.handler,
-                input_type=req.input_type,
-                output_type=req.output_type,
-                input_schema=req.input_schema,
-                output_schema=req.output_schema,
-                model_name=req.model_name,
-                config=req.config,
-                dependencies=req.dependencies,
-                runtime_env=req.runtime_env,
-                can_split=req.can_split,
-                is_deployable=req.is_deployable
-            )
-            return StageService._create_stage_db(db, stage_create)
-        finally:
-            db_gen.close()
-
-    @staticmethod
-    def get_stage(name: str) -> Optional[Dict]:
-        db_gen = get_db()
-        db = next(db_gen)
-        try:
-            stage = StageService._get_stage_db(db, name)
-            if stage:
-                return {
-                    "name": stage.name,
-                    "description": stage.description,
-                    "handler": stage.handler,
-                    "input_type": stage.input_type,
-                    "output_type": stage.output_type,
-                    "input_schema": stage.input_schema,
-                    "output_schema": stage.output_schema,
-                    "model_name": stage.model_name,
-                    "config": stage.config,
-                    "dependencies": stage.dependencies,
-                    "runtime_env": stage.runtime_env,
-                    "can_split": stage.can_split,
-                    "is_deployable": stage.is_deployable
-                }
-            return None
-        finally:
-            db_gen.close()
-
-    @staticmethod
-    def list_stages() -> Dict:
-        db_gen = get_db()
-        db = next(db_gen)
-        try:
-            stages = StageService._list_stages_db(db)
-            result = {}
-            for name, stage in stages.items():
-                result[name] = {
-                    "name": stage.name,
-                    "description": stage.description,
-                    "handler": stage.handler,
-                    "input_type": stage.input_type,
-                    "output_type": stage.output_type,
-                    "input_schema": stage.input_schema,
-                    "output_schema": stage.output_schema,
-                    "model_name": stage.model_name,
-                    "config": stage.config,
-                    "dependencies": stage.dependencies,
-                    "runtime_env": stage.runtime_env,
-                    "can_split": stage.can_split,
-                    "is_deployable": stage.is_deployable
-                }
-            return result
-        finally:
-            db_gen.close()
-    
-    # ========== 外部传入 DB 的接口（供 /db/v1/ 使用） ==========
-    @staticmethod
-    def _validate_db(req: StageCreate):
+    def _validate_db(db: Session, req: StageCreate):
         if not req.name:
             raise ValueError("Stage name required")
         if ":" not in req.handler:
@@ -117,10 +15,42 @@ class StageService:
             raise ValueError("input_type required")
         if not req.output_type:
             raise ValueError("output_type required")
+        # 校验 handler 引用的代码文件存在且包含该函数
+        import os, importlib.util
+        from config import CONFIG
+        module_name, func_name = req.handler.split(":", 1)
+        file_path = os.path.join(CONFIG.STAGED_CODE_DIR, f"{module_name}.py")
+        if not os.path.exists(file_path):
+            raise ValueError(f"Handler code file not found: staged_code/{module_name}.py")
+        try:
+            spec = importlib.util.spec_from_file_location(module_name, file_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            if not hasattr(module, func_name):
+                raise ValueError(f"Function '{func_name}' not found in module '{module_name}'")
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"Failed to load handler module: {e}")
+        # parent_stage 环路检测
+        if req.parent_stage:
+            visited = {req.name}
+            cur = req.parent_stage
+            while cur:
+                if cur in visited:
+                    raise ValueError(f"Cycle detected: parent_stage '{req.parent_stage}' would create a loop")
+                visited.add(cur)
+                parent = db.query(Stage).filter(Stage.name == cur).first()
+                cur = parent.parent_stage if parent else None
+        # 校验 model_name 存在（如果填写）
+        if req.model_name:
+            model_exists = db.query(Model).filter(Model.name == req.model_name).first()
+            if not model_exists:
+                raise ValueError(f"Model '{req.model_name}' not found. Register the model first or leave model_name empty.")
     
     @staticmethod
     def _create_stage_db(db: Session, req: StageCreate):
-        StageService._validate_db(req)
+        StageService._validate_db(db, req)
         
         existing = db.query(Stage).filter(Stage.name == req.name).first()
         if existing:
@@ -138,6 +68,7 @@ class StageService:
             config=req.config,
             dependencies=req.dependencies,
             runtime_env=req.runtime_env,
+            parent_stage=req.parent_stage,
             can_split=req.can_split,
             is_deployable=req.is_deployable
         )
@@ -159,3 +90,54 @@ class StageService:
     def _list_stages_db(db: Session) -> Dict:
         stages = db.query(Stage).all()
         return {stage.name: stage for stage in stages}
+    
+    @staticmethod
+    def _delete_stage_db(db: Session, name: str):
+        from config import CONFIG
+        import os
+        stage = db.query(Stage).filter(Stage.name == name).first()
+        if not stage:
+            raise ValueError(f"Stage not found: {name}")
+        # 检查是否被应用引用
+        from app.models import ApplicationStage, ApplicationEdge, ApplicationEntry, ApplicationExit
+        refs = (
+            db.query(ApplicationStage).filter(ApplicationStage.stage_name == name).count() +
+            db.query(ApplicationEdge).filter(
+                (ApplicationEdge.from_stage == name) | (ApplicationEdge.to_stage == name)
+            ).count() +
+            db.query(ApplicationEntry).filter(ApplicationEntry.stage_name == name).count() +
+            db.query(ApplicationExit).filter(ApplicationExit.stage_name == name).count()
+        )
+        if refs > 0:
+            raise ValueError(f"Cannot delete stage '{name}': it is referenced by {refs} application(s). Remove the references first.")
+        handler = stage.handler
+        module_name = handler.split(":")[0]
+        file_path = os.path.join(CONFIG.STAGED_CODE_DIR, f"{module_name}.py")
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        from app.models import DeploymentConfig
+        db.query(DeploymentConfig).filter(DeploymentConfig.stage_name == name).delete()
+        db.delete(stage)
+        db.commit()
+
+    @staticmethod
+    def _update_stage_db(db: Session, name: str, req: StageCreate):
+        StageService._validate_db(db, req)
+        stage = db.query(Stage).filter(Stage.name == name).first()
+        if not stage:
+            raise ValueError(f"Stage not found: {name}")
+        stage.description = req.description
+        stage.handler = req.handler
+        stage.input_type = req.input_type
+        stage.output_type = req.output_type
+        stage.input_schema = req.input_schema
+        stage.output_schema = req.output_schema
+        stage.model_name = req.model_name
+        stage.config = req.config
+        stage.dependencies = req.dependencies
+        stage.runtime_env = req.runtime_env
+        stage.parent_stage = req.parent_stage
+        stage.can_split = req.can_split
+        stage.is_deployable = req.is_deployable
+        db.commit()
+        db.refresh(stage)

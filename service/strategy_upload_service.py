@@ -2,9 +2,11 @@
 import os
 import hashlib
 import importlib
+import logging
 from typing import Dict, List, Optional, Tuple
+from config import CONFIG
 
-STRATEGY_CODE_DIR = "strategy_code"
+STRATEGY_CODE_DIR = CONFIG.STRATEGY_CODE_DIR
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 ALLOWED_EXTENSIONS = {'.py'}
 
@@ -153,8 +155,7 @@ class StrategyUploadService:
             importlib.invalidate_caches()
             module = importlib.import_module(module_name)
         except Exception as e:
-            # 即使导入失败也保存文件，因为可能缺少依赖
-            pass
+            logging.warning(f"Upload succeeded but module import failed for '{module_name}': {e}")
         
         return {
             "filename": safe_filename,

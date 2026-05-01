@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class MonitorRecordCreate(BaseModel):
@@ -53,6 +53,7 @@ class StageCreate(BaseModel):
     config: Optional[Dict[str, Any]] = None
     dependencies: Optional[Dict[str, Any]] = None
     runtime_env: Optional[Dict[str, Any]] = None
+    parent_stage: Optional[str] = None
     can_split: bool = False
     is_deployable: bool = True
 
@@ -69,6 +70,7 @@ class StageRead(BaseModel):
     config: Optional[Dict[str, Any]]
     dependencies: Optional[Dict[str, Any]]
     runtime_env: Optional[Dict[str, Any]]
+    parent_stage: Optional[str]
     can_split: bool
     is_deployable: bool
     created_at: datetime
@@ -101,7 +103,7 @@ class DeploymentConfigRead(BaseModel):
 
 class StrategyCreate(BaseModel):
     name: str
-    strategy_type: str
+    strategy_type: str = "routing"
     handler: str
     config: Optional[Dict[str, Any]] = None
     description: Optional[str] = None
@@ -150,7 +152,20 @@ class TaskCreate(BaseModel):
     app_name: str
     strategy_name: str
     input_data_uri: Optional[str] = None
+    input_data: Optional[Any] = None
     runtime_config: Optional[Dict[str, Any]] = None
+
+    @model_validator(mode='before')
+    @classmethod
+    def convert_input_data(cls, data):
+        if isinstance(data, dict):
+            input_data = data.get('input_data')
+            input_data_uri = data.get('input_data_uri')
+            if input_data is not None and not input_data_uri:
+                import json
+                data['input_data_uri'] = json.dumps(input_data)
+                data.pop('input_data', None)
+        return data
 
 
 class TaskRead(BaseModel):
@@ -165,11 +180,10 @@ class TaskRead(BaseModel):
     completed_at: Optional[datetime]
 
     model_config = {"from_attributes": True}
-    
+
+    @model_validator(mode='after')
     @classmethod
-    def model_validate(cls, obj, *args, **kwargs):
-        instance = super().model_validate(obj, *args, **kwargs)
-        # 反序列化 final_output_uri
+    def deserialize_final_output(cls, instance):
         if instance.final_output_uri:
             import json
             try:
@@ -207,6 +221,8 @@ class ExperimentCreate(BaseModel):
     input_dataset: List[Any]
     rounds: int = 1
     max_retries: int = 1
+    output_location: Optional[str] = None
+    result_method: str = "db"
 
 
 class ExperimentRead(BaseModel):
@@ -216,6 +232,9 @@ class ExperimentRead(BaseModel):
     strategy_group: List[Any]
     input_dataset: List[Any]
     rounds: int
+    max_retries: int = 1
+    output_location: Optional[str] = None
+    result_method: str = "db"
     status: str
     task_count: Optional[int] = None
     created_at: datetime
@@ -227,13 +246,21 @@ class ExperimentRead(BaseModel):
 class ExperimentReport(BaseModel):
     exp_id: str
     name: str
+    app_name: Optional[str] = None
     status: str
     total_tasks: int
     completed_tasks: int
     failed_tasks: int
+    pending_tasks: Optional[int] = None
     avg_execution_time_ms: Optional[float]
+    total_transfer_time_ms: Optional[float] = None
+    avg_cpu_percent: Optional[float] = None
+    avg_memory_mb: Optional[float] = None
     strategy_breakdown: List[Dict[str, Any]]
     stage_breakdown: List[Dict[str, Any]]
+    tier_breakdown: Optional[List[Dict[str, Any]]] = None
+    task_details: Optional[List[Dict[str, Any]]] = None
+    errors: Optional[List[Dict[str, Any]]] = None
     created_at: datetime
     completed_at: Optional[datetime]
 
@@ -256,3 +283,29 @@ class ExecutionTraceRead(BaseModel):
     error_msg: Optional[str]
 
     model_config = {"from_attributes": True}
+
+
+class StepRecord(BaseModel):
+    step_index: int
+    stage_name: str
+    node_id: str
+    node_tier: str
+    start_time: datetime
+    end_time: datetime
+    execution_time_ms: float
+    transfer_time_ms: float = 0.0
+    input_size_bytes: Optional[int] = None
+    output_size_bytes: Optional[int] = None
+    cpu_percent: Optional[float] = None
+    memory_mb: Optional[int] = None
+    error_msg: Optional[str] = None
+    ray_node_id: Optional[str] = None
+    node_ip: Optional[str] = None
+
+
+class ExecutionTraceSchema(BaseModel):
+    task_id: str
+    execution_path: List[StepRecord] = []
+    total_latency_ms: float = 0.0
+    total_transfer_overhead_ms: float = 0.0
+    error_logs: List[str] = []

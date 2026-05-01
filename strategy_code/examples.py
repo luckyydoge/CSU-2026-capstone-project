@@ -2,11 +2,9 @@ from typing import Dict, Any
 
 
 def simple_split_decide(context: Dict[str, Any], config: Dict[str, Any] = None) -> Dict[str, Any]:
-    """示例切分策略：如果 is_split_point，将输入切为 2 份"""
     possible_next = context.get("possible_next_stages", [])
     if not possible_next:
         return {"next_stage": None, "should_terminate": True}
-
     is_split = context.get("is_split_point", False) and context.get("stage_can_split", False)
     result = {
         "next_stage": possible_next[0],
@@ -19,7 +17,6 @@ def simple_split_decide(context: Dict[str, Any], config: Dict[str, Any] = None) 
 
 
 def simple_fallback_decide(context: Dict[str, Any], error_info: Dict[str, Any] = None, config: Dict[str, Any] = None) -> Dict[str, Any]:
-    """示例回退策略：失败时跳过当前阶段"""
     if error_info:
         print(f"[示例回退] 阶段 {error_info.get('stage')} 失败: {error_info.get('error')}")
         return {"action": "skip", "next_stage": context.get("possible_next_stages", [None])[0]}

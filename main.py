@@ -20,29 +20,33 @@ print("=" * 60)
 print("初始化 Ray 连接...")
 print(f"Ray 地址: {CONFIG.RAY_ADDRESS}")
 print(f"回退本地模式: {CONFIG.FALLBACK_LOCAL}")
+print(f"完全本地模式: {CONFIG.LOCAL_MODE}")
 
-import ray
-
-if CONFIG.RAY_ADDRESS:
-    try:
-        ray.init(address=CONFIG.RAY_ADDRESS, ignore_reinit_error=True)
-        print(f"✅ 成功连接到 Ray 集群: {CONFIG.RAY_ADDRESS}")
-    except Exception as e:
-        print(f"❌ 连接 Ray 集群失败: {e}")
-        if CONFIG.FALLBACK_LOCAL:
-            print("回退到本地模式...")
-            ray.init(ignore_reinit_error=True)
-            print("✅ 已启动本地 Ray 集群")
-        else:
-            raise
+if CONFIG.LOCAL_MODE:
+    print("✅ 本地模式已启用，跳过 Ray 初始化，使用本地模拟执行")
 else:
-    ray.init(ignore_reinit_error=True)
-    print("✅ 已启动本地 Ray 集群")
+    import ray
+
+    if CONFIG.RAY_ADDRESS:
+        try:
+            ray.init(address=CONFIG.RAY_ADDRESS, ignore_reinit_error=True)
+            print(f"✅ 成功连接到 Ray 集群: {CONFIG.RAY_ADDRESS}")
+        except Exception as e:
+            print(f"❌ 连接 Ray 集群失败: {e}")
+            if CONFIG.FALLBACK_LOCAL:
+                print("回退到本地模式...")
+                ray.init(ignore_reinit_error=True)
+                print("✅ 已启动本地 Ray 集群")
+            else:
+                raise
+    else:
+        ray.init(ignore_reinit_error=True)
+        print("✅ 已启动本地 Ray 集群")
 
 print("=" * 60)
 
 from api.routes import router as api_router
-from routers import monitor, db_api
+from routers import monitor
 
 app = FastAPI(title="协同推理平台 - 端边云协同系统")
 
@@ -71,19 +75,20 @@ def read_index():
 
 app.include_router(api_router)
 app.include_router(monitor.router)
-app.include_router(db_api.router)
 
 @app.on_event("startup")
 async def startup_event():
     Base.metadata.create_all(bind=engine)
     print("🚀 服务启动完成")
-    print(f"📊 Ray 集群信息: {ray.cluster_resources()}")
+    if not CONFIG.LOCAL_MODE:
+        print(f"📊 Ray 集群信息: {ray.cluster_resources()}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     print("🛑 关闭服务...")
-    ray.shutdown()
-    print("✅ Ray 已关闭")
+    if not CONFIG.LOCAL_MODE:
+        ray.shutdown()
+        print("✅ Ray 已关闭")
 
 if __name__ == "__main__":
     import uvicorn

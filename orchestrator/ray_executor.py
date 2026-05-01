@@ -1,29 +1,32 @@
 from typing import Any, Dict, List, Optional
 from datetime import datetime
-from models.task import TaskStatus
-from models.trace import ExecutionTrace, StepRecord
+from app.models import TaskStatus
+from app.schemas import ExecutionTraceSchema, StepRecord
 from orchestrator.strategy_loader import load_strategy
 from config import CONFIG
-import ray
 import time
 
 class RayExecutor:
 
     @staticmethod
-    def _load_stage_functions(stage_names: List[str]) -> Dict[str, Any]:
-        """批量加载阶段函数"""
-        from app.database import SessionLocal
+    def _load_stage_functions(stage_names: List[str], db=None) -> Dict[str, Any]:
+        """批量加载阶段函数，可选传入已有 db session"""
         from app.models import Stage
         import os
         import importlib.util
-        result = {}
-        db = SessionLocal()
+        own_db = False
+        if db is None:
+            from app.database import SessionLocal
+            db = SessionLocal()
+            own_db = True
         try:
             stages = db.query(Stage).filter(Stage.name.in_(stage_names)).all()
             stage_map = {s.name: s for s in stages}
         finally:
-            db.close()
+            if own_db:
+                db.close()
 
+        result = {}
         for name in stage_names:
             stage_info = stage_map.get(name)
             if not stage_info:
@@ -95,10 +98,58 @@ class RayExecutor:
         return target_tier in allowed_tiers
 
     @staticmethod
+    def _predict_resources(stage_input: Any, stage_info: Dict) -> Optional[Dict]:
+        """使用预测器预测阶段所需资源，返回 {cpu_cores, memory_mb} 或 None"""
+        from config import CONFIG
+        if not CONFIG.USE_RESOURCE_PREDICTOR:
+            return None
+        input_type = stage_info.get("input_type") if stage_info else None
+        if not input_type or input_type not in ("image", "video", "data"):
+            return None
+        raw = {}
+        if isinstance(stage_input, dict):
+            fc = stage_input.get("file_content")
+            meta = stage_input.get("metadata", {})
+            if fc and input_type == "image":
+                try:
+                    from PIL import Image
+                    import io
+                    img = Image.open(io.BytesIO(fc if isinstance(fc, bytes) else fc))
+                    raw["width"], raw["height"] = img.size
+                    raw["channels"] = len(img.getbands())
+                    raw["file_size_kb"] = len(fc) / 1024 if isinstance(fc, bytes) else 0
+                except Exception:
+                    pass
+            raw.update({k: v for k, v in meta.items() if k in (
+                "width", "height", "channels", "file_size_kb",
+                "duration_s", "fps", "bitrate_kbps",
+                "record_count", "field_count", "total_size_kb", "nesting_depth")})
+        if not raw:
+            return None
+        try:
+            from predictor.predict import predict
+            res = predict(input_type, raw)
+            return {"cpu_cores": max(0.1, res["cpu_percent"] / 100),
+                    "memory_mb": int(max(16, res["memory_mb"]))}
+        except Exception:
+            return None
+
+    @staticmethod
     def _execute_stage(stage_name: str, stage_input: Any, target_tier: str,
-                       stage_func=None, db=None) -> Dict:
-        """执行单个阶段，返回执行结果"""
+                       stage_func=None, db=None, stage_info: Dict = None,
+                       target_node: str = None) -> Dict:
+        """执行单个阶段，返回执行结果。
+
+        Args:
+            target_node: 策略指定的 Ray hex node ID，如果提供则使用节点亲和调度。
+        """
         deploy_config = RayExecutor._get_deployment_config(stage_name, db)
+
+        # 注入 stage config 到输入中
+        if stage_info:
+            sc = stage_info.get("config")
+            if sc and isinstance(stage_input, dict):
+                stage_input = {**stage_input, "_stage_config": sc}
 
         allowed_tiers = deploy_config.get("allowed_tiers", ["end", "edge", "cloud"])
         if not RayExecutor._validate_tier(target_tier, allowed_tiers):
@@ -108,6 +159,12 @@ class RayExecutor:
                 target_tier = fallback_tier
             else:
                 target_tier = "edge"
+
+        # 资源预测器覆盖（仅覆盖 cpu/memory，不覆盖 allowed_tiers）
+        predicted = RayExecutor._predict_resources(stage_input, stage_info)
+        if predicted:
+            print(f"[预测] {stage_name} → CPU={predicted['cpu_cores']:.1f}核 MEM={predicted['memory_mb']}MB")
+            deploy_config["resources"] = {**deploy_config.get("resources", {}), **predicted}
 
         resource_reqs = deploy_config.get("resources", {})
         cpu = resource_reqs.get("cpu_cores", 0.5)
@@ -141,9 +198,81 @@ class RayExecutor:
             ptype = proximity.get("proximity_type") if isinstance(proximity, dict) else None
             print(f"[调度] 邻近需求: stage={stage_name} 靠近 {target} ({ptype})")
 
+        # 构建 Ray runtime_env: 合并 dependencies 和 runtime_env
+        ray_runtime_env = {}
+        if stage_info:
+            deps = stage_info.get("dependencies")
+            if deps and isinstance(deps, list) and len(deps) > 0:
+                ray_runtime_env["pip"] = deps
+            renv = stage_info.get("runtime_env")
+            if renv and isinstance(renv, dict):
+                for k, v in renv.items():
+                    if k != "pip":
+                        ray_runtime_env[k] = v
+        if ray_runtime_env:
+            ray_options["runtime_env"] = ray_runtime_env
+
+        from config import CONFIG
+
+        # 节点亲和调度：策略指定了 target_node 时，优先调度到该节点
+        if target_node and not CONFIG.LOCAL_MODE:
+            from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
+            ray_options["scheduling_strategy"] = NodeAffinitySchedulingStrategy(
+                node_id=target_node, soft=True
+            )
+            print(f"[调度] 节点亲和: target_node={target_node[:12]}... (soft=True)")
+
         if stage_func is None:
             raise ValueError(f"No stage function provided for '{stage_name}'")
         wrapped_func = RayExecutor._wrap_stage_func(stage_func, target_tier)
+
+        if CONFIG.LOCAL_MODE:
+            start = datetime.utcnow()
+            before_call = time.perf_counter()
+            try:
+                output_package = wrapped_func(stage_input)
+                after_call = time.perf_counter()
+                end = datetime.utcnow()
+                exec_time_ms = (after_call - before_call) * 1000
+
+                output_data = output_package["result"]
+                node_info = output_package["node_info"]
+
+                node_id = node_info.get("worker_id") or node_info.get("hostname", "unknown")
+                real_tier = node_info.get("tier", "unknown")
+                if real_tier == "unknown":
+                    real_tier = target_tier
+
+                input_size = len(str(stage_input)) if stage_input else 0
+                output_size = len(str(output_data)) if output_data else 0
+
+                # 更新节点负载
+                if db and node_id:
+                    from service.node_info_service import NodeInfoService
+                    NodeInfoService._update_load_db(db, node_id,
+                        cpu_percent=node_info.get("_cpu_percent"),
+                        memory_percent=node_info.get("_memory_mb"))
+
+                return {
+                    "result": output_data,
+                    "node_id": node_id,
+                    "ray_node_id": node_info.get("ray_node_id"),
+                    "node_ip": node_info.get("node_ip"),
+                    "node_tier": real_tier,
+                    "execution_time_ms": exec_time_ms,
+                    "transfer_time_ms": 0.0,
+                    "input_size_bytes": input_size,
+                    "output_size_bytes": output_size,
+                    "cpu_percent": node_info.get("_cpu_percent"),
+                    "memory_mb": node_info.get("_memory_mb"),
+                    "start_time": start,
+                    "end_time": end,
+                    "success": True
+                }
+            except Exception as e:
+                return {"error": str(e), "success": False}
+
+        import ray
         remote_func = ray.remote(wrapped_func).options(**ray_options)
 
         start = datetime.utcnow()
@@ -166,7 +295,7 @@ class RayExecutor:
                 exec_time_ms = total_roundtrip_ms
                 transfer_time_ms = 0.0
 
-            node_id = node_info.get("worker_id") or node_info.get("hostname", "unknown")
+            node_id = node_info.get("ray_node_id") or node_info.get("worker_id") or node_info.get("hostname", "unknown")
             real_tier = node_info.get("tier", "unknown")
             if real_tier == "unknown":
                 real_tier = target_tier
@@ -174,9 +303,18 @@ class RayExecutor:
             input_size = len(str(stage_input)) if stage_input else 0
             output_size = len(str(output_data)) if output_data else 0
 
+            # 更新节点负载
+            if db and node_id:
+                from service.node_info_service import NodeInfoService
+                NodeInfoService._update_load_db(db, node_id,
+                    cpu_percent=node_info.get("_cpu_percent"),
+                    memory_percent=node_info.get("_memory_mb"))
+
             return {
                 "result": output_data,
                 "node_id": node_id,
+                "ray_node_id": node_info.get("ray_node_id"),
+                "node_ip": node_info.get("node_ip"),
                 "node_tier": real_tier,
                 "execution_time_ms": exec_time_ms,
                 "transfer_time_ms": transfer_time_ms,
@@ -202,51 +340,87 @@ class RayExecutor:
             import time
             import os
 
+            hostname = socket.gethostname()
+            node_ip = None
+            ray_node_id = None
+
             try:
                 import ray
-                node_id = ray.get_runtime_context().get_actor_id()
-            except:
-                node_id = "unknown"
+                ray_node_id = ray.get_runtime_context().get_node_id()
+                # 获取节点 IP：从 Ray 节点信息中查找
+                for n in ray.nodes():
+                    if n["NodeID"] == ray_node_id:
+                        node_ip = n.get("NodeManagerAddress", "")
+                        break
+            except Exception:
+                pass
 
-            hostname = socket.gethostname()
+            # node_id 优先用 Ray hex ID，回退到 hostname
+            node_id = ray_node_id or hostname
 
-            # 执行前采样
+            # 执行前采样：内存 + CPU 时间
             exec_before = time.perf_counter()
+            utime_before = stime_before = None
+            mem_mb = None
             try:
                 with open(f"/proc/{os.getpid()}/status") as f:
-                    mem_info = f.read()
-                vm_rss = None
-                for line in mem_info.split("\n"):
-                    if line.startswith("VmRSS:"):
-                        vm_rss = int(line.split()[1])  # kB
-                        break
-                mem_mb = vm_rss // 1024 if vm_rss else None
+                    for line in f:
+                        if line.startswith("VmRSS:"):
+                            mem_mb = int(line.split()[1]) // 1024
+                            break
             except:
-                mem_mb = None
+                pass
+            try:
+                with open(f"/proc/{os.getpid()}/stat") as f:
+                    line = f.read()
+                idx = line.rfind(")")
+                stat_fields = line[idx+1:].split()
+                utime_before = int(stat_fields[11])
+                stime_before = int(stat_fields[12])
+            except:
+                pass
 
             result = stage_func(input_data)
 
             # 执行后采样
             exec_after = time.perf_counter()
             exec_time_ms = (exec_after - exec_before) * 1000
+            mem_after_mb = None
+            utime_after = stime_after = None
             try:
                 with open(f"/proc/{os.getpid()}/status") as f:
-                    mem_info = f.read()
-                vm_rss = None
-                for line in mem_info.split("\n"):
-                    if line.startswith("VmRSS:"):
-                        vm_rss = int(line.split()[1])
-                        break
-                mem_after_mb = vm_rss // 1024 if vm_rss else None
+                    for line in f:
+                        if line.startswith("VmRSS:"):
+                            mem_after_mb = int(line.split()[1]) // 1024
+                            break
             except:
-                mem_after_mb = None
+                pass
+            try:
+                with open(f"/proc/{os.getpid()}/stat") as f:
+                    line = f.read()
+                idx = line.rfind(")")
+                stat_fields = line[idx+1:].split()
+                utime_after = int(stat_fields[11])
+                stime_after = int(stat_fields[12])
+            except:
+                pass
 
-            # 粗略 CPU 使用率：如果 mem_before 接近 mem_after 则简单估算
+            # CPU 使用率：进程 CPU 时间 / 墙上时间
             cpu_percent = None
+            if None not in (utime_before, utime_after, stime_before, stime_after) and exec_time_ms > 0:
+                try:
+                    clk_tck = os.sysconf(os.sysconf_names['SC_CLK_TCK'])
+                except:
+                    clk_tck = 100
+                cpu_ticks = (utime_after + stime_after - utime_before - stime_before)
+                cpu_time_ms = cpu_ticks * (1000.0 / clk_tck)
+                cpu_percent = min(100.0, cpu_time_ms / exec_time_ms * 100)
 
             node_info = {
                 "hostname": hostname,
                 "node_id": str(node_id),
+                "ray_node_id": ray_node_id,
+                "node_ip": node_ip,
                 "tier": expected_tier,
                 "_execution_time_ms": exec_time_ms,
                 "_cpu_percent": cpu_percent,
@@ -326,13 +500,32 @@ class RayExecutor:
             # 批量查询 stage 信息，消除 N+1
             stage_names = [s.stage_name for s in stages]
             stage_rows = db.query(StageModel).filter(StageModel.name.in_(stage_names)).all() if stage_names else []
+            from app.models import Model as ModelRecord
+            model_rows = db.query(ModelRecord).filter(ModelRecord.stage_name.in_(stage_names)).all() if stage_names else []
+            models_by_stage = {}
+            for m in model_rows:
+                models_by_stage.setdefault(m.stage_name, []).append({
+                    "model_id": m.model_id,
+                    "name": m.name,
+                    "version": m.version,
+                    "load_method": m.load_method,
+                    "inference_config": m.inference_config,
+                    "alternative_models": m.alternative_models,
+                })
+
             stage_info = {}
             for st in stage_rows:
                 stage_info[st.name] = {
                     "input_type": st.input_type,
                     "output_type": st.output_type,
                     "can_split": st.can_split,
+                    "parent_stage": st.parent_stage,
                     "split_config": st.config,
+                    "config": st.config,
+                    "dependencies": st.dependencies,
+                    "runtime_env": st.runtime_env,
+                    "model_name": st.model_name,
+                    "models": models_by_stage.get(st.name, []),
                 }
 
             return {
@@ -354,6 +547,53 @@ class RayExecutor:
             if own_session:
                 db.close()
     
+    @staticmethod
+    def _get_available_nodes(db) -> List[Dict]:
+        from service.node_info_service import NodeInfoService
+        return NodeInfoService._list_nodes_db(db)
+
+    @staticmethod
+    def _select_best_node(db, target_tier: str, target_node: str = None) -> Optional[str]:
+        """选择最佳 Ray 节点，返回 Ray hex node ID。
+
+        1. 如果策略指定了 target_node 且它在目标层级且健康 → 使用它
+        2. 否则按 CPU×0.5 + 内存×0.5 加权评分选最低负载节点
+        3. 无可用节点时返回 None（回退到 Ray 默认调度）
+        """
+        from service.node_info_service import NodeInfoService
+        nodes = NodeInfoService._list_nodes_db(db)
+        tier_nodes = [n for n in nodes if n.get("tier") == target_tier]
+
+        if not tier_nodes:
+            return None
+
+        if target_node:
+            match = next((n for n in tier_nodes if n["node_id"] == target_node), None)
+            if match and (match.get("current_cpu_percent") or 0) < 95:
+                return target_node
+            print(f"[调度] 指定节点 {target_node[:12]}... 不可用，回退到最优选择")
+
+        healthy = [n for n in tier_nodes if (n.get("current_cpu_percent") or 0) < 95]
+        if not healthy:
+            healthy = tier_nodes
+
+        def load_score(n):
+            cpu = n.get("current_cpu_percent") or 0
+            mem = n.get("current_memory_percent") or 0
+            return cpu * 0.5 + mem * 0.5
+
+        best = min(healthy, key=load_score)
+        best_id = best.get("node_id")
+        print(f"[调度] 最优节点: {best_id[:12] if best_id else '?'}... "
+              f"(CPU={best.get('current_cpu_percent', '?')}%, MEM={best.get('current_memory_percent', '?')}%)")
+        return best_id
+
+    @staticmethod
+    def _lookup_sub_stages(db, parent_stage_name: str) -> List[Dict]:
+        from app.models import Stage
+        sub_stages = db.query(Stage).filter(Stage.parent_stage == parent_stage_name).order_by(Stage.name).all()
+        return [{"name": s.name, "handler": s.handler} for s in sub_stages]
+
     @staticmethod
     def _split_input(data: Any, split_plan: Dict) -> List:
         """按 split_plan 将输入切分"""
@@ -393,14 +633,14 @@ class RayExecutor:
         try:
             app_dict = RayExecutor._get_app_dict(app_name, db)
 
-            strategy_func, strategy_type = load_strategy(strategy_name)
+            strategy = load_strategy(strategy_name, db)
 
             # 批量预加载所有阶段的函数
             all_stage_names = app_dict.get("stages", [])
             exit_stages = app_dict.get("exit_stages", [])
-            stage_funcs = RayExecutor._load_stage_functions(all_stage_names)
+            stage_funcs = RayExecutor._load_stage_functions(all_stage_names, db)
 
-            trace = ExecutionTrace(task_id=task_id)
+            trace = ExecutionTraceSchema(task_id=task_id)
             step_index = 0
             current_stage = app_dict["entry_stage"]
             current_input = input_data
@@ -428,6 +668,8 @@ class RayExecutor:
                     "runtime_config": runtime_config,
                     "is_split_point": has_split_point,
                     "stage_can_split": stage_can_split,
+                    "stage_models": cur_info.get("models", []),
+                    "available_nodes": RayExecutor._get_available_nodes(db),
                 }
 
                 print(f"[决策] 当前阶段={current_stage}, 可选下一步={possible_next}, is_exit={is_exit}")
@@ -437,12 +679,13 @@ class RayExecutor:
                     stage_input = RayExecutor._prepare_stage_input(current_input, current_stage)
                     deploy_config = RayExecutor._get_deployment_config(current_stage, db)
                     target_tier = deploy_config.get("allowed_tiers", ["edge"])[0]
-                    exec_result = RayExecutor._execute_stage(current_stage, stage_input, target_tier, stage_funcs[current_stage], db)
+                    target_node = RayExecutor._select_best_node(db, target_tier)
+                    exec_result = RayExecutor._execute_stage(current_stage, stage_input, target_tier, stage_funcs[current_stage], db, cur_info, target_node=target_node)
 
                     if not exec_result["success"]:
                         error_msg = exec_result.get('error', 'unknown error')
-                        if strategy_type == "fallback":
-                            fb_decision = strategy_func(context, {"error": error_msg, "stage": current_stage})
+                        if strategy.has_fallback:
+                            fb_decision = strategy.decide_fallback(context, {"error": error_msg, "stage": current_stage})
                             if fb_decision.get("action") == "skip" and fb_decision.get("next_stage"):
                                 print(f"[回退] 跳过 {current_stage} → {fb_decision['next_stage']}")
                                 current_stage = fb_decision["next_stage"]
@@ -463,13 +706,18 @@ class RayExecutor:
                         output_size_bytes=exec_result.get("output_size_bytes"),
                         cpu_percent=exec_result.get("cpu_percent"),
                         memory_mb=exec_result.get("memory_mb"),
+                        ray_node_id=exec_result.get("ray_node_id"),
+                        node_ip=exec_result.get("node_ip"),
                     )
                     trace.execution_path.append(step)
                     final_output = exec_result["result"]
                     print(f"[完成] 阶段 '{current_stage}' 是出口阶段，执行结束")
                     break
 
-                decision = strategy_func(context)
+                if has_split_point and stage_can_split and strategy.has_split:
+                    decision = strategy.decide_split(context)
+                else:
+                    decision = strategy.decide(context)
 
                 if decision.get("should_terminate"):
                     final_output = current_input
@@ -488,7 +736,9 @@ class RayExecutor:
                     raise ValueError(f"Strategy returned next_stage '{next_stage}' which is not in possible_next: {possible_next}")
 
                 target_tier = decision.get("target_tier", "edge")
-                print(f"[调度决策] stage={next_stage}, target_tier={target_tier}")
+                strategy_target_node = decision.get("target_node")
+                target_node = RayExecutor._select_best_node(db, target_tier, strategy_target_node)
+                print(f"[调度决策] stage={next_stage}, target_tier={target_tier}, target_node={target_node[:12] if target_node else 'auto'}...")
 
                 stage_input = RayExecutor._prepare_stage_input(current_input, current_stage)
 
@@ -496,18 +746,47 @@ class RayExecutor:
                 if split_plan:
                     print(f"[切分] 切分执行 {current_stage}, count={split_plan.get('count', 1)}")
                     parts = RayExecutor._split_input(stage_input, split_plan)
-                    remote_func_raw = stage_funcs[current_stage]
-                    wrapped = RayExecutor._wrap_stage_func(remote_func_raw, target_tier)
-                    deploy_config = RayExecutor._get_deployment_config(current_stage, db)
-                    tier_resource = RayExecutor._get_tier_resource_name(target_tier)
-                    ray_opts = {
-                        "num_cpus": deploy_config.get("resources", {}).get("cpu_cores", 0.5),
-                        "resources": {tier_resource: 1},
-                    }
-                    remote = ray.remote(wrapped).options(**ray_opts)
-                    refs = [remote.remote(p) for p in parts]
-                    split_results = ray.get(refs)
-                    outputs = [r["result"] for r in split_results]
+                    sub_stages = RayExecutor._lookup_sub_stages(db, current_stage)
+                    from config import CONFIG
+
+                    if sub_stages:
+                        print(f"[切分] 发现 {len(sub_stages)} 个子阶段: {[s['name'] for s in sub_stages]}")
+                        sub_funcs = RayExecutor._load_stage_functions([s['name'] for s in sub_stages], db)
+                        chunk_results = []
+                        total_exec = 0.0
+                        for i, part in enumerate(parts):
+                            data = part
+                            for s in sub_stages:
+                                sf = sub_funcs[s['name']]
+                                w = RayExecutor._wrap_stage_func(sf, target_tier)
+                                wrapped_out = w(data)
+                                data = wrapped_out["result"]
+                                total_exec += wrapped_out.get("node_info", {}).get("_execution_time_ms", 0)
+                            chunk_results.append(data)
+                        outputs = chunk_results
+                        exec_time_sum = total_exec
+                    else:
+                        remote_func_raw = stage_funcs[current_stage]
+                        wrapped = RayExecutor._wrap_stage_func(remote_func_raw, target_tier)
+                        deploy_config = RayExecutor._get_deployment_config(current_stage, db)
+
+                        if CONFIG.LOCAL_MODE:
+                            wrapped_results = [wrapped(p) for p in parts]
+                            outputs = [r["result"] for r in wrapped_results]
+                            exec_time_sum = sum(r.get("node_info", {}).get("_execution_time_ms", 0) for r in wrapped_results)
+                        else:
+                            import ray
+                            tier_resource = RayExecutor._get_tier_resource_name(target_tier)
+                            ray_opts = {
+                                "num_cpus": deploy_config.get("resources", {}).get("cpu_cores", 0.5),
+                                "resources": {tier_resource: 1},
+                            }
+                            remote = ray.remote(wrapped).options(**ray_opts)
+                            refs = [remote.remote(p) for p in parts]
+                            split_results = ray.get(refs)
+                            outputs = [r["result"] for r in split_results]
+                            exec_time_sum = sum(r.get("node_info", {}).get("_execution_time_ms", 0) for r in split_results)
+
                     merged_output = RayExecutor._merge_outputs(outputs)
                     exec_result = {
                         "result": merged_output,
@@ -515,18 +794,18 @@ class RayExecutor:
                         "node_tier": target_tier,
                         "start_time": datetime.utcnow(),
                         "end_time": datetime.utcnow(),
-                        "execution_time_ms": sum(r.get("node_info", {}).get("_execution_time_ms", 0) for r in split_results),
+                        "execution_time_ms": exec_time_sum,
                         "transfer_time_ms": 0.0,
                         "success": True,
                     }
                 else:
                     print(f"[执行] 运行阶段: {current_stage} -> {next_stage}")
-                    exec_result = RayExecutor._execute_stage(current_stage, stage_input, target_tier, stage_funcs[current_stage], db)
+                    exec_result = RayExecutor._execute_stage(current_stage, stage_input, target_tier, stage_funcs[current_stage], db, cur_info, target_node=target_node)
 
                 if not exec_result["success"]:
                     error_msg = exec_result.get('error', 'unknown error')
-                    if strategy_type == "fallback":
-                        fb_decision = strategy_func(context, {"error": error_msg, "stage": current_stage})
+                    if strategy.has_fallback:
+                        fb_decision = strategy.decide_fallback(context, {"error": error_msg, "stage": current_stage})
                         if fb_decision.get("action") == "skip" and fb_decision.get("next_stage"):
                             print(f"[回退] 跳过 {current_stage} → {fb_decision['next_stage']}")
                             current_stage = fb_decision["next_stage"]
@@ -547,6 +826,8 @@ class RayExecutor:
                     output_size_bytes=exec_result.get("output_size_bytes"),
                     cpu_percent=exec_result.get("cpu_percent"),
                     memory_mb=exec_result.get("memory_mb"),
+                    ray_node_id=exec_result.get("ray_node_id"),
+                    node_ip=exec_result.get("node_ip"),
                 )
                 trace.execution_path.append(step)
                 current_input = exec_result["result"]
@@ -564,6 +845,12 @@ class RayExecutor:
                         print(f"[变换] {cur_out} → {next_in} via {transform.name}")
                         current_input = DataTransformService.apply_transform(
                             transform.handler, current_input, transform.config
+                        )
+                    else:
+                        raise ValueError(
+                            f"Type mismatch: '{current_stage}' outputs '{cur_out}', "
+                            f"but '{next_stage}' expects '{next_in}'. "
+                            f"No DataTransform registered for '{cur_out}' → '{next_in}'"
                         )
 
                 current_stage = next_stage

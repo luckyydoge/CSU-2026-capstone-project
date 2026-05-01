@@ -1,33 +1,38 @@
 def run(input_data):
     import io
     import os
-    
+
     file_content = input_data.get("file_content")
     metadata = input_data.get("metadata", {})
-    
+
     if not file_content:
         return {"error": "No file content provided"}
-    
-    print(f"[output] 收到文件内容，长度={len(file_content)} bytes")
-    
+
     try:
-        final_size = None
-        try:
-            from PIL import Image
-            image = Image.open(io.BytesIO(file_content))
-            final_size = image.size
-            print(f"[output] 最终图片大小: {final_size}")
-            print(f"[output] 图片格式: {image.format}")
-        except ImportError:
-            print(f"[output] PIL 不可用，不解析图片")
-        
+        from PIL import Image
+
+        image = Image.open(io.BytesIO(file_content))
+        print(f"[output] 最终图片大小: {image.size}")
+        print(f"[output] 图片格式: {image.format}")
         print(f"[output] 元数据: {metadata}")
-        
+
+        output_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "outputs")
+        os.makedirs(output_dir, exist_ok=True)
+
+        output_filename = f"resized_image_{metadata.get('resize_ratio', 'final')}.png"
+        output_path = os.path.join(output_dir, output_filename)
+
+        image.save(output_path)
+        print(f"[output] 图片已保存到: {output_path}")
+
+        file_size = os.path.getsize(output_path)
+        print(f"[output] 输出文件大小: {file_size} bytes")
+
         return {
             "status": "success",
-            "note": "File processed successfully (no save to disk due to permissions)",
-            "output_size": len(file_content),
-            "final_size": final_size,
+            "output_path": output_path,
+            "output_size": file_size,
+            "final_size": image.size,
             "metadata": metadata
         }
     except Exception as e:
